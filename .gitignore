@@ -55,3 +55,25 @@ CodeCoverage/
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Node / Vite client
+node_modules/
+npm-debug.log*
+yarn-error.log*
+yarn-debug.log*
+
+# Vite build output (served from ASP.NET Core wwwroot)
+src/eh.DockManager.Server/wwwroot/
+
+# Runtime data volume (docker-compose: ./data:/data)
+data/
+
+# Environment overrides
+.env.*
+
+# IDE / OS
+.vs/
+.idea/
+.DS_Store
+*.user
+*.suo

@@ -22,6 +22,10 @@
     <EventSourceSupport>false</EventSourceSupport>
     <XmlResolverIsNetworkingEnabledByDefault>false</XmlResolverIsNetworkingEnabledByDefault>
 
+    <!-- Reflection-based System.Text.Json is required by the dynamic control-plane payloads. -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <EnableUnsafeBinaryFormatterSerialization>false</EnableUnsafeBinaryFormatterSerialization>
+
     <!-- Strict Supply-Chain Security & CVE Gate -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <NuGetAudit>true</NuGetAudit>
@@ -41,6 +45,20 @@
     <PackageReference Include="ITfoxtec.Identity.Saml2" Version="4.21.0" />
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.12" />
     <PackageReference Include="Microsoft.IdentityModel.Tokens.Saml" Version="8.23.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Keep reflection-driven libraries intact under PublishTrimmed. -->
+    <TrimmerRootAssembly Include="YamlDotNet" />
+    <TrimmerRootAssembly Include="Fido2" />
+    <TrimmerRootAssembly Include="Fido2.Models" />
+    <TrimmerRootAssembly Include="Fido2.AspNet" />
+    <TrimmerRootAssembly Include="ITfoxtec.Identity.Saml2" />
+    <TrimmerRootAssembly Include="KubernetesClient" />
+    <TrimmerRootAssembly Include="Microsoft.IdentityModel.Tokens.Saml" />
+    <TrimmerRootAssembly Include="System.ServiceModel.Primitives" />
+    <TrimmerRootAssembly Include="SQLitePCLRaw.batteries_v2" />
+    <TrimmerRootAssembly Include="SQLitePCLRaw.core" />
   </ItemGroup>
 
 </Project>

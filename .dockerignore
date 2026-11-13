@@ -1,0 +1,11 @@
+# File: .dockerignore
+**/bin
+**/obj
+**/node_modules
+**/dist
+src/eh.DockManager.Server/wwwroot
+data
+.git
+.gitignore
+*.md
+!README.md

@@ -8,11 +8,15 @@ namespace eh.DockManager.Server.Models;
 /// </summary>
 public static class EhConstants
 {
-    public const string DataDir = "/data";
-    public const string DbPath = "/data/dockmanager.db";
-    public const string StacksDir = "/data/stacks";
-    public const string CertsDir = "/data/certs";
-    public const string MasterKeyPath = "/data/.master.key";
+    /// <summary>Root data directory. Override with the <c>EHDM_DATA_DIR</c> environment variable.</summary>
+    public static readonly string DataDir =
+        Environment.GetEnvironmentVariable("EHDM_DATA_DIR") is { Length: > 0 } dir ? dir : "/data";
+
+    public static readonly string DbPath = Path.Combine(DataDir, "dockmanager.db");
+    public static readonly string StacksDir = Path.Combine(DataDir, "stacks");
+    public static readonly string CertsDir = Path.Combine(DataDir, "certs");
+    public static readonly string MasterKeyPath = Path.Combine(DataDir, ".master.key");
+    public static readonly string KeysDir = Path.Combine(DataDir, "keys");
     public const string ActorLabel = "eh.dockmanager.actor";
     public const string ActorDetailLabel = "eh.dockmanager.actor_detail";
     public const string ConfigHashLabel = "eh.dockmanager.config_hash";
@@ -399,4 +403,11 @@ public sealed record ProvenanceEvent(
     DateTimeOffset Timestamp);
 
 /// <summary>Directory entry for the Tar file browser.</summary>
-public sealed record TarEntry(string Name, bool IsDirectory, long Size, DateTimeOffset Modified, string Mode);
+public sealed record TarEntryInfo(string Name, bool IsDirectory, long Size, DateTimeOffset Modified, string Mode);
+
+/// <summary>Notifier abstraction so workers can emit events without depending on a concrete transport.</summary>
+public interface IEventNotifier
+{
+    Task NotifyAsync(string eventType, string title, string message, CancellationToken ct = default);
+    Task NotifyAsync(string eventType, string title, string message, object? payload, CancellationToken ct = default);
+}

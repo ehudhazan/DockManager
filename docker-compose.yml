@@ -1,5 +1,6 @@
 # File: docker-compose.yml
 name: eh-dockmanager
+
 services:
   eh-dockmanager:
     build: .
@@ -7,6 +8,7 @@ services:
     container_name: eh-dockmanager
     restart: unless-stopped
     ports:
+      - "80:80"
       - "443:443"
       - "8443:8443"
     volumes:
@@ -16,9 +18,14 @@ services:
       - "${DOCKER_GID:-999}"
     environment:
       - EHDM_DATA_DIR=/data
+      - EHDM_HTTP_PORT=80
       - EHDM_PORTAL_PORT=443
       - EHDM_ADMIN_PORT=8443
-      - EHDM_LAN_IP=10.10.1.1
+      - EHDM_PORTAL_DOMAIN=${EHDM_PORTAL_DOMAIN:-dock.lan}
+      - EHDM_LAN_IP=${EHDM_LAN_IP:-10.10.1.1}
+      # First-run bootstrap administrator (only used when the users table is empty).
+      - EHDM_ADMIN_USER=${EHDM_ADMIN_USER:-admin}
+      - EHDM_ADMIN_PASSWORD=${EHDM_ADMIN_PASSWORD:-}
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -26,3 +33,9 @@ services:
       - ALL
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
+    healthcheck:
+      test: ["CMD", "/app/eh-dockmanager", "--health-probe"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

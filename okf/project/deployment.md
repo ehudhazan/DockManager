@@ -4,7 +4,7 @@ title: Host preparation
 description: Host-side steps required before the compose stack starts: bind-mount ownership, the host docker group id, and the empty-password bootstrap fallback.
 tags: [deployment, compose, permissions, bootstrap]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:23:24Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T10:05:49Z }
 sources:
   - id: compose-file
     resource: ../../docker-compose.yml
@@ -82,3 +82,18 @@ container list confirms the Docker socket is reachable through the `group_add` g
 * If the host already ran the app with an empty password, the users table is not empty;
   delete `/data/dockmanager.db` (or change the password in the UI) before the next
   bootstrap. The bootstrap only runs when the users table is empty.
+* **`.env` changes to `EHDM_ADMIN_USER`/`EHDM_ADMIN_PASSWORD` have no effect once the
+  users table is non-empty** — the values only seed the *first* admin. A login with the
+  `.env` password then fails with `401 {"error":"Invalid credentials."}` (surfaced in the
+  UI only as a ~3.2 s toast), which looks like the env not loading but is not. To make the
+  `.env` value take effect without wiping the rest of the database, stop the stack and
+  clear just the `Users` rows instead of the whole file:
+
+  ```bash
+  docker compose stop          # checkpoints the WAL so no -wal/-shm sidecar remains
+  # edit data/dockmanager.db: DELETE FROM Users; (and Passkeys), or delete the file
+  docker compose up -d         # bootstrap re-runs and logs the credentials once
+  ```
+
+  The `.db` is owned by `64198:root` mode `644`, so on a host where the operator is not
+  `64198`/root it can only be edited through a root container (e.g. `busybox`) or `sudo`.

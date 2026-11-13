@@ -4,7 +4,7 @@ title: eh.DockManager
 description: Home-server and enterprise container/cluster control plane, port 443 reverse proxy and app portal, auto-updater, and MCP server built on .NET 11 and React 19.
 tags: [project, dockmanager, architecture]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T08:52:06Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:28:57Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -49,10 +49,10 @@ build rules.[^prompt-md]
 |------|----------|
 | `PROMPT.md` | Build brief and requirements (normative) |
 | `global.json` | .NET SDK pin (`11.0.100`, `rollForward: latestMajor`) |
-| `opencode.json` | OpenCode configuration (DebugMCP MCP server) |
+| `opencode.json` | OpenCode configuration (DebugMCP and Chrome DevTools MCP servers) |
 | `src/eh.DockManager.Server/` | ASP.NET Core server, implemented: `Program.cs` (hosts everything), `Models/DomainModels.cs`, `Data/SqliteWalStore.cs`, `Security/{CryptoAndCertManager,AuthAndSsoEngine,QrCodeGenerator}.cs`, `Docker/{DockerSocketClient,DockerStreamDemuxer}.cs`, `Stacks/ComposeAndConverters.cs`, `Kubernetes/KubeClusterService.cs`, `Portal/YarpPortalProxy.cs`, `McpAndWebhooks/McpAndWebhookEngine.cs` |
 | `src/eh.DockManager.Client/` | Vite + React 19 + Tailwind client, implemented: `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `tsconfig.json`, and `src/{main.tsx,App.tsx,api.ts,types.ts,index.css}` |
-| `Dockerfile`, `docker-compose.yml`, `.dockerignore` | Multi-stage build and deployment |
+| `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Multi-stage build and deployment; `.env.example` is the host-local template (the real `.env` is gitignored) |
 | `AGENTS.md` | Binding knowledge-workflow rules for every agent |
 | `okf/` | This knowledge bundle |
 | `.opencode/skills/okf/` | The `okf` skill that defines the knowledge workflow |
@@ -67,6 +67,11 @@ runtime behaviours exercised, and the deviations discovered during the build).
 * Skill that implements it: `.opencode/skills/okf/SKILL.md`.
 * Change history for this bundle: [Update log](/log.md).
 * Binding dependency and build rules: [Stack constraints](/project/stack-constraints.md).
+* Host-side compose prerequisites: [Host preparation](/project/deployment.md).
+* Working-environment guardrails (PII/secret redaction in tool output):
+  [Agent environment guardrails](/environment/guardrails.md).
+* Browser automation against a laptop Chrome from this host:
+  [Chrome DevTools MCP over an SSH reverse tunnel](/environment/chrome-mcp-over-ssh.md).
 
 # Notes
 

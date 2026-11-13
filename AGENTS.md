@@ -179,7 +179,7 @@ If a future agent would benefit from knowing it, it belongs in the bundle.
 | Knowledge workflow skill | [`.opencode/skills/okf/SKILL.md`](.opencode/skills/okf/SKILL.md) |
 | Server sources | `src/eh.DockManager.Server/` |
 | Client sources | `src/eh.DockManager.Client/` |
-| Container build | `Dockerfile`, `docker-compose.yml` |
+| Container build | `Dockerfile`, `docker-compose.yml`, `.env.example` |
 
 Verification commands:
 

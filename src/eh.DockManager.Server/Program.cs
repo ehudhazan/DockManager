@@ -276,9 +276,13 @@ await EnsureLocalDockerHostAsync();
 await samlSp.ReloadAsync();
 await samlIdp.ReloadAsync();
 
-var adminUser = Environment.GetEnvironmentVariable("EHDM_ADMIN_USER") ?? "admin";
-var adminPassword = Environment.GetEnvironmentVariable("EHDM_ADMIN_PASSWORD")
-                    ?? Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
+// Empty-string values are treated as unset: the compose file always exports
+// EHDM_ADMIN_PASSWORD (empty by default), so a plain ?? fallback would bootstrap
+// the admin with an empty password.
+var adminUser = Environment.GetEnvironmentVariable("EHDM_ADMIN_USER") is { Length: > 0 } u ? u : "admin";
+var adminPassword = Environment.GetEnvironmentVariable("EHDM_ADMIN_PASSWORD") is { Length: > 0 } p
+    ? p
+    : Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(12));
 if (await authService.EnsureBootstrapAdminAsync(adminUser, adminPassword) is not null)
     startupLog.LogWarning("Initial admin credentials -> user: {User} password: {Password}", adminUser, adminPassword);
 

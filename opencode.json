@@ -5,6 +5,19 @@
       "DebugMCP": {
         "type": "remote",
         "url": "http://localhost:3001/mcp"
+      },
+      "chrome-devtools": {
+        "type": "local",
+        "command": [
+          "npx",
+          "-y",
+          "chrome-devtools-mcp@latest",
+          "--browser-url",
+          "http://127.0.0.1:9222"
+        ],
+        "environment": {
+          "CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS": "1"
+        }
       }
     }
   }

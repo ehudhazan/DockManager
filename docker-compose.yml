@@ -1,4 +1,14 @@
 # File: docker-compose.yml
+#
+# Host preparation (required):
+#   * The image runs as uid/gid 64198 (distroless, non-root). Docker creates a
+#     missing bind-mount directory as root:root, so the first run fails with
+#     "Access to the path '/data/stacks' is denied". Pre-create the directory and
+#     give it to the container's uid/gid:
+#       mkdir -p data && sudo chown -R 64198:64198 data
+#   * The container must be in the host's docker group to read the socket. Set
+#     DOCKER_GID to the host's group id (getent group docker | cut -d: -f3) in
+#     .env, or the default 999 below is used.
 name: eh-dockmanager
 
 services:

@@ -4,7 +4,7 @@ title: Delivered implementation
 description: What was actually built and verified for eh.DockManager, the generated file set, runtime behaviours exercised, and the deviations from PROMPT.md discovered during the build.
 tags: [status, implementation, build, deviations]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T08:52:06Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:23:24Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -41,6 +41,7 @@ The order in PROMPT.md §9 was followed. Every generated file carries a
 | MCP & webhooks | `McpAndWebhooks/McpAndWebhookEngine.cs` |
 | Client | `src/eh.DockManager.Client/{index.html,package.json,vite.config.ts,tailwind.config.js,postcss.config.js,tsconfig.json,src/{main.tsx,App.tsx,api.ts,types.ts,index.css}}` |
 | Container | `Dockerfile`, `docker-compose.yml`, `.dockerignore` |
+| Host config | `.env.example` (host-local `.env` is gitignored) |
 
 `Security/QrCodeGenerator.cs` is an intentional **addition** to the §9 list: PROMPT.md bans
 third-party TOTP packages and requires an SVG QR generator, so a self-contained QR Code
@@ -65,10 +66,26 @@ and the trimmed single-file Release publish):
 * `--health-probe` returning exit 0 while the app listens and exit 1 when it does not.
 * The distroless image booting as uid `64198` with a read-only rootfs and all capabilities
   dropped.
+* The compose stack starting on a host whose `./data` directory is owned by `64198:64198`
+  and whose `DOCKER_GID` matches the host's docker group; `GET /api/system/health` returns
+  200 and `GET /api/containers` reaches the Docker socket.
 
 Verification was performed by the building agent (deterministic build/run commands); no
 independent `process:`/`human:` verifier has been recorded, so this concept remains in the
 **unverified** trust tier.
+
+# Fixes applied during the first compose run
+
+* **Bind-mount permission:** `docker compose up` failed with
+  `UnauthorizedAccessException` at `/data/stacks` because Docker created the host
+  `./data` directory as `root:root` and the image runs as uid `64198`. Fixed by
+  chowning the host directory to `64198:64198`; the host preparation steps are in
+  [Host preparation](/project/deployment.md).
+* **Empty bootstrap password:** `Program.cs` read `EHDM_ADMIN_PASSWORD` with `??`, which
+  only catches `null`, so the compose file's empty-string export bootstrapped the admin
+  with an empty password. The fix treats empty values as unset and falls back to a
+  random 16-byte password. The `docker-compose.yml` `DOCKER_GID` default was also
+  documented as host-specific; `.env.example` records the host's gid.
 
 # Deviations from PROMPT.md
 

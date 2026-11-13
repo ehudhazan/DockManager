@@ -4,7 +4,7 @@ title: Stack constraints
 description: Binding dependency, build, container, port, and storage constraints for eh.DockManager, including the audited NuGet allowlist and banned packages.
 tags: [constraints, dependencies, build, security]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T08:52:06Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:23:24Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -59,6 +59,30 @@ failures, and are accepted per the allowlist below.
 * Non-root user `$APP_UID` `64198` (`ENV APP_UID=64198`, `USER $APP_UID`).
 * Hardened compose flags: `--read-only`, `--cap-drop=ALL`,
   `--security-opt=no-new-privileges:true`.[^prompt-md]
+
+# Host bind mount and first-run permissions
+
+The compose stack mounts `./data:/data`. Docker creates a missing bind-mount
+directory as `root:root`, while the image runs as uid `64198`; the first
+`docker compose up` therefore fails with `UnauthorizedAccessException` on
+`/data/stacks`. Pre-create the host directory and give it to the container's uid:
+
+```bash
+mkdir -p data
+sudo chown -R 64198:64198 data
+```
+
+The container must also join the host's docker group to read `/var/run/docker.sock`
+(`660 root:docker`); set `DOCKER_GID` to the host's gid in `.env` (see `.env.example`).
+See [Host preparation](/project/deployment.md) for the full runbook.
+
+# First-run bootstrap admin
+
+`EHDM_ADMIN_USER` and `EHDM_ADMIN_PASSWORD` are read from the environment. Empty
+values are treated as unset (the `Program.cs` fix checks `is { Length: > 0 }`): the
+admin password falls back to a random 16-byte value, logged once at startup as
+`Initial admin credentials -> user: admin password: …`. The bootstrap only runs when
+the users table is empty.
 
 # NuGet allowlist (audited — nothing else is permitted)
 

@@ -2,9 +2,9 @@
 type: Reference
 title: Stack YAML editor
 description: How the Stacks view YAML editor validates a compose document, offers keyboard-driven key and value completions, and indents lists and mappings intelligently, and the schema validator endpoint behind it.
-tags: [stacks, compose, yaml, editor, validation, ux, api]
+tags: [stacks, compose, yaml, editor, validation, ux, api, mcp]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T20:20:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
 sources:
   - id: validator
     resource: ../../src/eh.DockManager.Server/Stacks/ComposeSchemaValidator.cs
@@ -18,6 +18,12 @@ sources:
   - id: program-cs
     resource: ../../src/eh.DockManager.Server/Program.cs
     title: Program.cs — POST /api/stacks/validate
+  - id: mcp
+    resource: ../../src/eh.DockManager.Server/McpAndWebhooks/McpAndWebhookEngine.cs
+    title: McpAndWebhookEngine.cs — the validate_stack tool
+  - id: tests
+    resource: ../../src/eh.DockManager.Client/tests/yaml.test.mjs
+    title: yaml.test.mjs — engine and editor key-handling checks
 ---
 
 # Goal
@@ -66,9 +72,16 @@ for enums, and an example for freeform scalars.[^engine]
   offered (filtered by the typed prefix), each with a description and its kind.
 * **Value completions** — for a scalar with `values` (e.g. `restart`) the valid set is offered; for a
   sequence the list-item template is offered; for a freeform scalar an example is offered.
-* **Keyboard** — `Ctrl/⌘+Space` opens the list (or it opens automatically once a prefix is typed);
-  `↑`/`↓` move, `Enter`/`Tab` apply, `Esc` dismisses. Mouse users can click an entry. The panel shows the
-  resolved path (e.g. `services → web → ports`) so context is never ambiguous.
+* **Keyboard** — `Ctrl/⌘+Space` opens the list (or it opens automatically once a prefix is typed at a key
+  position or on a closed-set enum value); `↑`/`↓` move, `Enter`/`Tab` apply, `Esc` dismisses. Mouse users
+  can click an entry. The panel is anchored to the caret line, shows the resolved path
+  (e.g. `services → web → ports`), and never covers the hint/issue rows under the editor.
+* **Empty values** — completing `key:` with nothing after the colon puts a mapping child or a list item on
+  the next line at the right indent (`ports:` → `- "8080:80"`; `healthcheck:` → `test: `), and a scalar
+  value gets its separating space (`restart:` → `restart: always`), so a completion never produces
+  `restart:always` or `ports:- …`.
+* **Offsets are absolute** — `suggest()` returns the document offset (`replaceFrom`) to splice at, never a
+  line-relative one, so applying a completion anywhere in the file leaves the text above it untouched.
 
 # Smart Enter and Tab
 
@@ -81,6 +94,7 @@ for enums, and an example for freeform scalars.[^engine]
 | `key: value` | new line at the same indent |
 | `- value` (scalar list item) | new line with another `- ` at the same indent |
 | `- key:` (map inside a list, e.g. long-syntax `volumes`) | new line at `indent + 2`, continuing properties |
+| `- key: value` (mapping entry inside a list item) | new line at `indent + 2`; only when the colon is followed by a space, so `- ./data:/data` and `- "8080:80"` still continue the list |
 | blank line | matches the previous non-empty line's indent |
 
 `Tab` inserts two spaces (compose's convention); with a multi-line selection it indents every selected
@@ -97,8 +111,27 @@ only adds the schema-level findings. The editor merges and de-duplicates the two
 
 The Stacks view renders `YamlEditor` in place of the old `<textarea>`: the source on the left, a status
 line (`Ctrl/⌘ Space` hint, indent hint, error/warning count or "schema ok"), and a clickable issue list
-where selecting a finding focuses the editor and selects that line. The toolbar keeps **Save** (blocked
-while errors exist, naming the first one) and adds **Validate**; the live diff view is unchanged.[^editor]
+where selecting a finding focuses the editor and selects that line. The editor area is a bounded flex
+region, so those hint and issue labels always sit *below* the source instead of being overlapped by the
+textarea or the completion list. The toolbar keeps **Save** (blocked while errors exist, naming the first
+one) and adds **Validate**; the live diff view is unchanged.[^editor]
+
+# MCP
+
+The same validator is exposed to agents as the `validate_stack` MCP tool (`stack:read`): pass `yaml`, or a
+saved stack `name`, and it returns `{ valid, name, serviceCount, issues[] }` with the same located
+line/column findings — so an agent editing a stack gets the editor's checks without a browser. A key
+without `stack:read` gets JSON-RPC `-32003` naming the missing grant; see
+[MCP server permissions & audit](/project/mcp.md).[^mcp]
+
+# Tests
+
+`src/eh.DockManager.Client/tests/yaml.test.mjs` (`npm test` in the client) bundles `yaml.ts` with esbuild
+and runs dependency-free checks over the engine and the editor's exact key handling: absolute completion
+offsets (applying a completion never deletes earlier text), empty-value child insertion, bare list items,
+smart Enter (including `- key: value`), `Tab`/`Shift+Tab` indentation, and the enum lint. It mirrors
+`YamlEditor`'s `apply`/`enter`/`tab` handlers, so a change to the component's splicing must change the test
+with it.[^tests]
 
 # Related
 
@@ -109,3 +142,5 @@ while errors exist, naming the first one) and adds **Validate**; the live diff v
 [^engine]: yaml.ts — schema tree, completion engine, smart Enter and local enum lint
 [^editor]: ui.tsx — YamlEditor component
 [^program-cs]: Program.cs — POST /api/stacks/validate
+[^mcp]: McpAndWebhookEngine.cs — the validate_stack tool
+[^tests]: yaml.test.mjs — engine and editor key-handling checks

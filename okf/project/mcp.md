@@ -4,7 +4,7 @@ title: MCP server permissions & audit
 description: How the built-in MCP server authenticates scoped bearer keys, the resource:action[:target] scope grammar it enforces, the tool surface it exposes, and how every MCP action is attributed in the audit log.
 tags: [mcp, security, permissions, audit, api, scopes]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T19:45:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
 sources:
   - id: mcp-src
     resource: ../../src/eh.DockManager.Server/McpAndWebhooks/McpAndWebhookEngine.cs
@@ -78,11 +78,11 @@ provenance feed shows who changed which key. Because the key **name** is what ap
 
 # Tool surface
 
-**59 tools** cover the control plane, grouped by resource:
+**60 tools** cover the control plane, grouped by resource:
 
 | Resource | Tools |
 |----------|-------|
-| `stack` | list, get, save, delete, deploy, action, auto-update, `save_stack_secret`, convert (`docker run` ↔ Compose ↔ K8s) |
+| `stack` | list, get, **`validate_stack`** (read-only schema check), save, delete, deploy, action, auto-update, `save_stack_secret`, convert (`docker run` ↔ Compose ↔ K8s) |
 | `container` | list, get, action (start/stop/restart/pause/unpause/remove), `create_container`, logs, `list_container_files`, `read_container_file` |
 | `exec` | `exec_command` |
 | `image` | list, `get_image`, pull, remove, prune |

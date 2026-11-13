@@ -4,7 +4,7 @@ title: Dashboard metrics & aggregation
 description: What the Dashboard shows, where each metric comes from, and how the server keeps the per-container stats fan-out cheap for the host and the browser.
 tags: [dashboard, metrics, docker, stats, api, performance]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T19:45:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
 sources:
   - id: program-cs
     resource: ../../src/eh.DockManager.Server/Program.cs
@@ -24,7 +24,7 @@ needs:[^program-cs]
 | `overall` | containers total/running/paused/stopped, images, CPU %, CPU cores, memory used/total MB, network in/out bytes, published host-port count, and disk (images/layers/volumes/build cache/total). |
 | `containers[]` | per container: name, image, state, CPU % (+ cores, throttled periods/time), memory used/limit/peak MB + allocation failures, PIDs, block read/written, network in/out + packets + errors + drops, published/exposed ports, writable-layer and root-fs size, created. |
 | `hosts[]` | one panel per configured Docker host: online, container counts, images, CPU %, cores, memory used/total, disk used, or the last error. |
-| `network` | the selected host's `NetworkSummary` from [Network metrics & traffic history](/project/network-metrics.md): 1h/24h in+out totals, packet/error/drop counters, TCP connection health, host interfaces and the sampled timeline. |
+| `network` | the selected host's `NetworkSummaryResponse` from [Network metrics & traffic history](/project/network-metrics.md): 1h/24h in+out totals, packet/error/drop counters, TCP connection health, host interfaces, host load/process counters (`system`) and the sampled timeline. |
 
 # Data sources
 

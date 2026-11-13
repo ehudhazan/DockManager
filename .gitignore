@@ -65,6 +65,9 @@ yarn-debug.log*
 # Vite build output (served from ASP.NET Core wwwroot)
 src/eh.DockManager.Server/wwwroot/
 
+# Client test bundle (`npm test`)
+src/eh.DockManager.Client/.test-build/
+
 # Runtime data volume (docker-compose: ./data:/data)
 data/
 

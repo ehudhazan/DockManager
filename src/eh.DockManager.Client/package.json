@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "esbuild src/yaml.ts --bundle --format=esm --outfile=.test-build/yaml.mjs --log-level=error && node tests/yaml.test.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

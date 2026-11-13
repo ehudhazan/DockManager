@@ -186,6 +186,7 @@ public sealed class McpServer
 
     private readonly ComposeStackService _compose;
     private readonly ComposeParser _parser;
+    private readonly ComposeSchemaValidator _validator;
     private readonly DockerClientFactory _docker;
     private readonly KubeClusterService _kube;
     private readonly SqliteWalStore _store;
@@ -197,13 +198,15 @@ public sealed class McpServer
     private readonly WakeOnLanService _wol;
     private readonly ILogger<McpServer> _log;
 
-    public McpServer(ComposeStackService compose, ComposeParser parser, DockerClientFactory docker,
+    public McpServer(ComposeStackService compose, ComposeParser parser, ComposeSchemaValidator validator,
+        DockerClientFactory docker,
         KubeClusterService kube, SqliteWalStore store, Portal.PortalProxyConfigurator portal,
         Portal.PortalDiscoveryService discovery, Security.CertificateManager certs, Security.CryptoVault vault,
         WebhookNotifier notifier, WakeOnLanService wol, ILogger<McpServer> log)
     {
         _compose = compose;
         _parser = parser;
+        _validator = validator;
         _docker = docker;
         _kube = kube;
         _store = store;
@@ -357,6 +360,37 @@ public sealed class McpServer
                 var yaml = File.Exists(path) ? await File.ReadAllTextAsync(path, ct).ConfigureAwait(false) : "";
                 var meta = await _store.GetStackAsync(name, ct).ConfigureAwait(false);
                 return TextResult(idNode, new JsonObject { ["name"] = name, ["yaml"] = yaml, ["meta"] = meta?.ToString() }.ToJsonString());
+            }
+
+            case "validate_stack":
+            {
+                var yaml = Arg("yaml");
+                var name = Arg("name");
+                if (string.IsNullOrWhiteSpace(yaml) && !string.IsNullOrWhiteSpace(name))
+                {
+                    var path = _compose.ComposePath(name);
+                    if (!File.Exists(path)) return Error(idNode, -32602, $"Stack '{name}' not found.");
+                    yaml = await File.ReadAllTextAsync(path, ct).ConfigureAwait(false);
+                }
+                if (string.IsNullOrWhiteSpace(yaml))
+                    return Error(idNode, -32602, "Provide 'yaml' to validate, or a saved stack 'name'.");
+
+                var validation = _validator.Validate(yaml);
+                var issues = new JsonArray(validation.Issues.Select(issue => (JsonNode)new JsonObject
+                {
+                    ["line"] = issue.Line,
+                    ["column"] = issue.Column,
+                    ["message"] = issue.Message,
+                    ["severity"] = issue.Severity,
+                    ["path"] = issue.Path
+                }).ToArray());
+                return TextResult(idNode, new JsonObject
+                {
+                    ["valid"] = validation.Valid,
+                    ["name"] = validation.Name is null ? null : JsonValue.Create(validation.Name),
+                    ["serviceCount"] = validation.ServiceCount,
+                    ["issues"] = issues
+                }.ToJsonString(), !validation.Valid);
             }
 
             case "deploy_stack":
@@ -1323,6 +1357,7 @@ public sealed class McpServer
     {
         ["list_stacks"] = new("stack", "list", null),
         ["get_stack"] = new("stack", "read", "name"),
+        ["validate_stack"] = new("stack", "read", null),
         ["deploy_stack"] = new("stack", "write", "name"),
         ["save_stack"] = new("stack", "write", "name"),
         ["delete_stack"] = new("stack", "delete", "name"),
@@ -1407,6 +1442,7 @@ public sealed class McpServer
         {
             ("list_stacks", Tool("list_stacks", "List all compose stacks with their state and auto-update counters.", new JsonObject(), Req())),
             ("get_stack", Tool("get_stack", "Return a stack's compose YAML and metadata.", new JsonObject { ["name"] = Str("Stack name") }, Req("name"))),
+            ("validate_stack", Tool("validate_stack", "Validate compose YAML against the schema: parse errors with line/column, unknown keys, invalid enum values and bad port mappings. Pass 'yaml', or a saved stack 'name'.", new JsonObject { ["yaml"] = Str("Compose YAML to validate"), ["name"] = Str("Existing stack name (alternative to yaml)") }, Req())),
             ("deploy_stack", Tool("deploy_stack", "Deploy (or reconcile) a compose stack by name.", new JsonObject { ["name"] = Str("Stack name") }, Req("name"))),
             ("save_stack", Tool("save_stack", "Save a compose stack's YAML.", new JsonObject { ["name"] = Str("Stack name"), ["yaml"] = Str("Compose YAML") }, Req("name", "yaml"))),
             ("delete_stack", Tool("delete_stack", "Delete a compose stack and its files.", new JsonObject { ["name"] = Str("Stack name") }, Req("name"))),

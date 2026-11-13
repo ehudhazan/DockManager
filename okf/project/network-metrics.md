@@ -4,7 +4,7 @@ title: Network metrics & traffic history
 description: How DockManager samples container and host network traffic into a 24-hour ring buffer, the 1h/24h totals, drops, errors and TCP connection-reset counters it exposes, and the endpoints that serve them.
 tags: [network, metrics, docker, api, charts, monitoring]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T19:45:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
 sources:
   - id: tracker
     resource: ../../src/eh.DockManager.Server/Docker/NetworkMetricsTracker.cs
@@ -59,17 +59,21 @@ Where the container can read the host's `/proc`, the summary also reports:
 * `hostTcp` — from `/proc/net/snmp` (Tcp lines): `currEstab`, `activeOpens`, `passiveOpens`,
   `attemptFails`, `estabResets` (connection resets), `retransSegs` (retransmits), `inErrs`, `outRsts`.
 * `hostInterfaces` — from `/proc/net/dev`, one entry per non-loopback interface.
+* `system` (`HostSystemCounters`) — from `/proc/loadavg` (1/5/15-minute load and running/total processes),
+  `/proc/stat` (`procs_blocked` and the `processes` fork counter) and `/proc/meminfo` (total/available
+  memory and swap), plus `Environment.ProcessorCount` for the core count.
 
-Both are **best-effort**: the distroless container ships no shell but `/proc` is usually mounted, and a
+All are **best-effort**: the distroless container ships no shell but `/proc` is usually mounted, and a
 restricted sandbox simply yields `null`/empty and the UI explains the absence rather than failing.
 
 # API
 
 | Method | Path | Returns |
 |--------|------|---------|
-| `GET` | `/api/system/network?hostId=` | `NetworkSummaryResponse`: 1h/24h in+out totals, packet/error/drop counters, `hostTcp`, `hostInterfaces`, and the sampled `history` |
+| `GET` | `/api/system/network?hostId=` | `NetworkSummaryResponse`: 1h/24h in+out totals, packet/error/drop counters, `hostTcp`, `hostInterfaces`, `system` (host load/process/memory) and the sampled `history` |
 | `GET` | `/api/containers/{id}/metrics` | one-shot `ExtendedContainerMetric` (`stats`) plus the container's `ContainerNetworkHistory` (`network`) |
 | `GET` | `/api/containers/{id}/network` | the container's network timeline only |
+| `GET` | `/api/containers/{id}/stats` (SSE) | every 2 s, the full `ParseExtendedMetric` sample (CPU %, cores, memory + peak, PIDs, block read/written, network bytes and packets), which the portal cards and the inspector turn into live rates |
 
 The dashboard's `GET /api/system/dashboard` payload includes the same `network` summary for the selected
 host, so a single poll feeds the tiles, the container table and the traffic chart. See
@@ -83,6 +87,11 @@ host, so a single poll feeds the tiles, the container table and the traffic char
   container's own traffic next to the CPU/memory sparklines, with throttle/PID/block-IO detail.
 * Labels are human-readable ("Received", "Sent", "Connection resets (established)") and details stay
   hidden until expanded; see [UI & UX conventions](/project/ui-ux.md).[^client]
+* The Dashboard panel also shows host load / process counters under the chart and a **Host load &
+  processes** disclosure (load averages, processes running/total/blocked, forks, memory, swap).
+* The Portal card's **More info** disclosure and the container **Inspect → Stats** tab chart the live
+  network **and disk** rates from the enriched stats stream, using the shared `MiniMetric`/`counterRate`
+  atoms (cumulative counter → per-second rate).
 
 # Limitations
 

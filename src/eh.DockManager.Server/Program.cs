@@ -2263,16 +2263,24 @@ internal static class StreamingEndpoints
 
     private static string ComputeMetricJson(string id, string payload)
     {
-        if (TryComputeMetric(id, payload) is not { } metric)
+        if (NetworkMetricsTracker.ParseExtendedMetric(id, payload) is not { } metric)
             return JsonSerializer.Serialize(new { error = "Unable to parse container stats." }, Json);
         return JsonSerializer.Serialize(new
         {
             containerId = metric.ContainerId,
             cpuPercent = metric.CpuPercent,
+            cpuCores = metric.CpuCores,
             memoryMb = metric.MemoryMb,
             memoryLimitMb = metric.MemoryLimitMb,
+            memoryPeakMb = metric.MemoryPeakMb,
+            pidsCurrent = metric.PidsCurrent,
+            pidsLimit = metric.PidsLimit,
+            blockReadBytes = metric.BlockReadBytes,
+            blockWriteBytes = metric.BlockWriteBytes,
             networkRxBytes = metric.NetworkRxBytes,
             networkTxBytes = metric.NetworkTxBytes,
+            networkRxPackets = metric.NetworkRxPackets,
+            networkTxPackets = metric.NetworkTxPackets,
             timestamp = DateTimeOffset.UtcNow
         }, Json);
     }

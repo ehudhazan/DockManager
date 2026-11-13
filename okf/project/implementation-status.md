@@ -4,7 +4,7 @@ title: Delivered implementation
 description: What was actually built and verified for eh.DockManager, the generated file set, runtime behaviours exercised, and the deviations from PROMPT.md discovered during the build.
 tags: [status, implementation, build, deviations]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T19:45:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -243,6 +243,38 @@ A follow-up pass reworked the client and closed several runtime gaps; see
   (L4:14), `- "not-a-port"` (L6:10), `volumes[1].type: bork` (L8:15) and an unknown `portz` key (L7:1) on
   the expected lines, and reported a YAML syntax error at its parser position. `dotnet build`,
   `npm run typecheck`, `npm run build` and `docker compose build` pass. No `verified` entry was added.
+
+# Seventh pass — editor fix, validate_stack MCP tool, richer charts
+
+* **Stack editor bug fixed** — `suggest()` returned a **line-relative** `replaceFrom` while `YamlEditor`
+  applied it as an **absolute** document offset, so choosing a completion on any line but the first wiped
+  everything before it (the reported "keyboard menu deleted all"). `suggest()` now returns an absolute
+  offset and the editor splices up to the caret. Also fixed: completing an empty value opens a mapping
+  child or list item on the next line (`ports:` → `- "8080:80"`) and gives a scalar its separating space
+  (`restart:` → `restart: always`); a bare `- ` completes the item schema instead of doubling the dash;
+  `Enter` inside a `- key: value` list item continues its properties (not a new dash); `Enter` with a
+  selection no longer duplicates the tail; and auto-open fires only at key positions and closed enums. The
+  completion list is anchored to the caret line and the editor area is a bounded flex region, so the hint
+  and issue labels below it are no longer overlapped. See [Stack YAML editor](/project/stack-yaml-editor.md).
+* **`validate_stack` MCP tool** — the editor's validator is reachable over MCP (`stack:read`), taking `yaml`
+  or a saved stack `name` and returning `{ valid, name, serviceCount, issues[] }` with located line/column
+  findings. Tool surface: **60**. See [MCP server permissions & audit](/project/mcp.md).
+* **Richer charts** — the stats SSE (`GET /api/containers/{id}/stats`) now emits the full
+  `ParseExtendedMetric` sample (cores, memory peak, PIDs, block read/written, network bytes/packets); the
+  Portal card's **More info** shows live network and disk sparklines plus process/thread, core, memory-peak
+  and block-[ADDRESS] counters, the container inspector adds a **Disk throughput** chart, and the Dashboard's
+  Network traffic panel adds host load/process counters and a **Host load & processes** disclosure
+  (`HostSystemCounters` from `/proc/loadavg`, `/proc/stat`, `/proc/meminfo`). New `MiniMetric`/`counterRate`
+  atoms; see [UI & UX conventions](/project/ui-ux.md) and
+  [Network metrics & traffic history](/project/network-metrics.md).
+* **Tests** — a dependency-free client suite (`src/eh.DockManager.Client/tests/yaml.test.mjs`, run with
+  `npm test`) holds 38 checks over the engine and the editor's key handling. Verified live against the
+  rebuilt container through the browser MCP: the completion applies without deleting text, the menu and
+  labels render correctly, the portal and inspector charts populate, and an end-to-end MCP run showed the
+  scope-filtered `tools/list` (`list_stacks`, `get_stack`, `validate_stack`), `validate_stack` returning
+  `valid:false` with located issues, and `save_stack` denied with `-32003`. `dotnet build`,
+  `npm run typecheck`, `npm run build`, `npm test` and `docker compose build` pass. No `verified` entry was
+  added (self-run tests are not independent verification).
 
 # Notes
 

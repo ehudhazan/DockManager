@@ -25,8 +25,10 @@ import {
   classNames,
   Expand,
   MetricRow,
+  MiniMetric,
   RefreshControl,
   TrafficChart,
+  counterRate,
   formatBytes,
   formatDuration,
   formatNumber,
@@ -57,6 +59,7 @@ import type {
   KubeClusterInfo,
   LandingResponse,
   McpKeyInfo,
+  MetricSample,
   PasskeyInfo,
   PortalApp,
   RegistryInfo,
@@ -1137,22 +1140,40 @@ function PortalCard({
 }) {
   const [cpu, setCpu] = useState<number[]>([]);
   const [ram, setRam] = useState<number[]>([]);
+  const [netIn, setNetIn] = useState<number[]>([]);
+  const [netOut, setNetOut] = useState<number[]>([]);
+  const [diskRead, setDiskRead] = useState<number[]>([]);
+  const [diskWrite, setDiskWrite] = useState<number[]>([]);
+  const [latest, setLatest] = useState<MetricSample | null>(null);
+  const previous = useRef<MetricSample | null>(null);
 
   useEffect(() => {
     if (!live || !app.containerName) return undefined;
     const source = new EventSource(api.statsUrl(app.containerName), { withCredentials: true });
     source.onmessage = (event) => {
       try {
-        const sample = JSON.parse(event.data) as { cpuPercent?: number; memoryMb?: number; error?: string };
+        const sample = JSON.parse(event.data) as MetricSample & { error?: string };
         if (sample.error) return;
-        setCpu((prev) => [...prev, sample.cpuPercent ?? 0].slice(-30));
-        setRam((prev) => [...prev, sample.memoryMb ?? 0].slice(-30));
+        const prev = previous.current;
+        previous.current = sample;
+        const seconds = prev
+          ? Math.max(1, (new Date(sample.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 1000)
+          : 0;
+        setLatest(sample);
+        setCpu((p) => [...p, sample.cpuPercent ?? 0].slice(-30));
+        setRam((p) => [...p, sample.memoryMb ?? 0].slice(-30));
+        setNetIn((p) => [...p, counterRate(prev?.networkRxBytes, sample.networkRxBytes ?? 0, seconds)].slice(-30));
+        setNetOut((p) => [...p, counterRate(prev?.networkTxBytes, sample.networkTxBytes ?? 0, seconds)].slice(-30));
+        setDiskRead((p) => [...p, counterRate(prev?.blockReadBytes, sample.blockReadBytes ?? 0, seconds)].slice(-30));
+        setDiskWrite((p) => [...p, counterRate(prev?.blockWriteBytes, sample.blockWriteBytes ?? 0, seconds)].slice(-30));
       } catch {
         /* ignore malformed frames */
       }
     };
     return () => source.close();
   }, [live, app.containerName]);
+
+  const last = (series: number[]) => series[series.length - 1] ?? 0;
 
   const accessLabel = app.auth === 'Public' ? 'anyone' : app.auth === 'Sso' ? 'signed-in users' : 'admins only';
 
@@ -1193,6 +1214,14 @@ function PortalCard({
 
       <div className="mt-auto space-y-2">
         <Expand title="More info" hint={app.auth === 'Public' ? 'public' : app.auth === 'Sso' ? 'signed-in' : 'admins'}>
+          {live && app.containerName && (
+            <div className="mb-2 grid grid-cols-2 gap-2">
+              <MiniMetric label="Network in" value={formatRate(last(netIn))} data={netIn} stroke="#38bdf8" />
+              <MiniMetric label="Network out" value={formatRate(last(netOut))} data={netOut} stroke="#22d3ee" />
+              <MiniMetric label="Disk read" value={formatRate(last(diskRead))} data={diskRead} stroke="#f59e0b" />
+              <MiniMetric label="Disk write" value={formatRate(last(diskWrite))} data={diskWrite} stroke="#f472b6" />
+            </div>
+          )}
           <MetricRow label="Name" value={app.name} />
           <MetricRow label="Address" value={<span className="font-mono text-[11px]">{app.subdomain}</span>} />
           <MetricRow label="Category" value={app.category} />
@@ -1203,6 +1232,17 @@ function PortalCard({
           {app.externalUrl && <MetricRow label="External URL" value={<span className="font-mono text-[11px]">{app.externalUrl}</span>} />}
           <MetricRow label="Discovered" value={app.autoDiscovered ? 'automatically' : 'manually added'} />
           {app.hidden && <MetricRow label="Visibility" value="hidden from the portal" />}
+          {latest && (
+            <>
+              <MetricRow label="Processes / threads" value={formatNumber(latest.pidsCurrent)} hint={latest.pidsLimit > 0 ? `limit ${formatNumber(latest.pidsLimit)}` : undefined} />
+              <MetricRow label="CPU cores" value={formatNumber(latest.cpuCores)} />
+              <MetricRow label="Memory peak" value={formatBytes(latest.memoryPeakMb * 1024 * 1024)} />
+              <MetricRow label="Disk read total" value={formatBytes(latest.blockReadBytes)} />
+              <MetricRow label="Disk written total" value={formatBytes(latest.blockWriteBytes)} />
+              <MetricRow label="Network in / out" value={`${formatBytes(latest.networkRxBytes)} / ${formatBytes(latest.networkTxBytes)}`} />
+              <MetricRow label="Packets in / out" value={`${formatNumber(latest.networkRxPackets)} / ${formatNumber(latest.networkTxPackets)}`} />
+            </>
+          )}
         </Expand>
         <div className="flex min-w-0 items-center gap-2">
           <StatusPill status={app.auth === 'Admin' ? 'admin' : app.auth} />
@@ -1903,6 +1943,15 @@ function NetworkSection({ network, onConfigure }: { network?: NetworkSummary; on
         <TrafficChart inData={inRates} outData={outRates} />
       </div>
 
+      {network.system && (
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400 sm:grid-cols-4">
+          <span>Load <span className="tabular-nums text-slate-200">{network.system.load1.toFixed(2)}</span></span>
+          <span>Processes <span className="tabular-nums text-slate-200">{formatNumber(network.system.processesTotal)}</span></span>
+          <span>Blocked <span className="tabular-nums text-slate-200">{formatNumber(network.system.processesBlocked)}</span></span>
+          <span>Memory free <span className="tabular-nums text-slate-200">{formatBytes(network.system.memoryAvailableKb * 1024)}</span></span>
+        </div>
+      )}
+
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <Expand title="Counters & issues" hint={`${network.rxDropped + network.txDropped} dropped`}>
           <MetricRow label="Packets received" value={formatNumber(network.rxPackets)} />
@@ -1932,6 +1981,24 @@ function NetworkSection({ network, onConfigure }: { network?: NetworkSummary; on
             </div>
           )}
         </Expand>
+
+        {network.system && (
+          <Expand
+            title="Host load & processes"
+            hint={`load ${network.system.load1.toFixed(2)} · ${formatNumber(network.system.processesTotal)} processes`}
+          >
+            <MetricRow label="Load average (1 / 5 / 15 min)" value={`${network.system.load1.toFixed(2)} / ${network.system.load5.toFixed(2)} / ${network.system.load15.toFixed(2)}`} />
+            <MetricRow label="CPU cores" value={formatNumber(network.system.cpuCores)} />
+            <MetricRow label="Processes running" value={formatNumber(network.system.processesRunning)} hint={`of ${formatNumber(network.system.processesTotal)}`} />
+            <MetricRow label="Processes blocked" value={formatNumber(network.system.processesBlocked)} />
+            <MetricRow label="Processes created (forks)" value={formatNumber(network.system.forks)} />
+            <MetricRow label="Memory total" value={formatBytes(network.system.memoryTotalKb * 1024)} />
+            <MetricRow label="Memory available" value={formatBytes(network.system.memoryAvailableKb * 1024)} />
+            {network.system.swapTotalKb > 0 && (
+              <MetricRow label="Swap used" value={`${formatBytes((network.system.swapTotalKb - network.system.swapFreeKb) * 1024)} of ${formatBytes(network.system.swapTotalKb * 1024)}`} />
+            )}
+          </Expand>
+        )}
 
         <Expand title={`Interfaces (${network.hostInterfaces.length})`} hint="host-level">
           {network.hostInterfaces.length === 0 && (
@@ -1999,7 +2066,7 @@ function ContainerMetricGrid({ container }: { container: DashboardContainerInfo 
       </div>
       <div>
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Processes &amp; disk</div>
-        <MetricRow label="Processes (PIDs)" value={formatNumber(container.pidsCurrent)} hint={container.pidsLimit > 0 ? `limit ${formatNumber(container.pidsLimit)}` : undefined} />
+        <MetricRow label="Processes / threads (PIDs)" value={formatNumber(container.pidsCurrent)} hint={container.pidsLimit > 0 ? `limit ${formatNumber(container.pidsLimit)}` : undefined} />
         <MetricRow label="Block read" value={formatBytes(container.blockReadBytes)} />
         <MetricRow label="Block written" value={formatBytes(container.blockWriteBytes)} />
         <MetricRow label="Writable layer" value={formatBytes(container.sizeRwBytes)} />
@@ -2683,6 +2750,9 @@ function ContainerInspector({
   const [shell, setShell] = useState('/bin/sh');
   const [cpu, setCpu] = useState<number[]>([]);
   const [ram, setRam] = useState<number[]>([]);
+  const [ioRead, setIoRead] = useState<number[]>([]);
+  const [ioWrite, setIoWrite] = useState<number[]>([]);
+  const previous = useRef<MetricSample | null>(null);
   const [logs, setLogs] = useState<{ stream: string; line: string }[]>([]);
   const [filter, setFilter] = useState('');
   const [path, setPath] = useState('/');
@@ -2719,10 +2789,17 @@ function ContainerInspector({
     const source = new EventSource(api.statsUrl(id), { withCredentials: true });
     source.onmessage = (event) => {
       try {
-        const sample = JSON.parse(event.data) as { cpuPercent?: number; memoryMb?: number; error?: string };
+        const sample = JSON.parse(event.data) as MetricSample & { error?: string };
         if (sample.error) return;
-        setCpu((prev) => [...prev, sample.cpuPercent ?? 0].slice(-60));
-        setRam((prev) => [...prev, sample.memoryMb ?? 0].slice(-60));
+        const prev = previous.current;
+        previous.current = sample;
+        const seconds = prev
+          ? Math.max(1, (new Date(sample.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 1000)
+          : 0;
+        setCpu((p) => [...p, sample.cpuPercent ?? 0].slice(-60));
+        setRam((p) => [...p, sample.memoryMb ?? 0].slice(-60));
+        setIoRead((p) => [...p, counterRate(prev?.blockReadBytes, sample.blockReadBytes ?? 0, seconds)].slice(-60));
+        setIoWrite((p) => [...p, counterRate(prev?.blockWriteBytes, sample.blockWriteBytes ?? 0, seconds)].slice(-60));
       } catch {
         /* ignore */
       }
@@ -2827,6 +2904,16 @@ function ContainerInspector({
                 )}
               </div>
 
+              <div className="card p-3">
+                <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+                  <span>Disk throughput</span>
+                  <span>
+                    read {formatRate(ioRead[ioRead.length - 1] ?? 0)} · write {formatRate(ioWrite[ioWrite.length - 1] ?? 0)}
+                  </span>
+                </div>
+                <TrafficChart inData={ioRead} outData={ioWrite} inLabel="Read" outLabel="Write" />
+              </div>
+
               {extended && (
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="card p-3">
@@ -2844,7 +2931,7 @@ function ContainerInspector({
                   </div>
                   <div className="card p-3">
                     <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Processes &amp; disk</div>
-                    <MetricRow label="Processes (PIDs)" value={formatNumber(extended.pidsCurrent)} hint={extended.pidsLimit > 0 ? `limit ${formatNumber(extended.pidsLimit)}` : undefined} />
+                    <MetricRow label="Processes / threads (PIDs)" value={formatNumber(extended.pidsCurrent)} hint={extended.pidsLimit > 0 ? `limit ${formatNumber(extended.pidsLimit)}` : undefined} />
                     <MetricRow label="Block read" value={formatBytes(extended.blockReadBytes)} />
                     <MetricRow label="Block written" value={formatBytes(extended.blockWriteBytes)} />
                   </div>

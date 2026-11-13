@@ -1,5 +1,5 @@
 // File: src/eh.DockManager.Client/src/ui.tsx
-import { cloneElement, isValidElement, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { Icon, type IconName } from './icons';
 import {
@@ -319,6 +319,40 @@ export function Sparkline({ data, stroke = '#38bdf8', height = 30 }: { data: num
       <polyline points={points} fill="none" stroke={stroke} strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
     </svg>
   );
+}
+
+/** A labelled sparkline row for dense operational panels (portal cards, stacks, inspectors). */
+export function MiniMetric({
+  label,
+  value,
+  data,
+  stroke = '#38bdf8',
+  height = 26,
+  hint
+}: {
+  label: string;
+  value: ReactNode;
+  data: number[];
+  stroke?: string;
+  height?: number;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2 text-[10px] text-slate-400">
+        <span className="truncate">{label}</span>
+        <span className="shrink-0 tabular-nums text-slate-200" title={hint}>{value}</span>
+      </div>
+      <Sparkline data={data} stroke={stroke} height={height} />
+    </div>
+  );
+}
+
+/** Per-second rate between two cumulative counter samples; 0 when the counter reset. */
+export function counterRate(previous: number | undefined, current: number, seconds: number): number {
+  if (previous === undefined || seconds <= 0) return 0;
+  const delta = current - previous;
+  return delta >= 0 ? delta / seconds : 0;
 }
 
 export function Tabs<T extends string>({ value, onChange, tabs }: { value: T; onChange: (value: T) => void; tabs: { key: T; label: string; icon?: IconName; badge?: ReactNode }[] }) {
@@ -696,6 +730,11 @@ export function TrafficChart({
 //   * issues from the server validator and the local enum lint are listed below and
 //     click to jump to the offending line.
 // ────────────────────────────────────────────────────────────────────────────
+// Geometry of the textarea used to anchor the completion list near the caret.
+const YAML_LINE_HEIGHT = 20; // matches `leading-5`
+const YAML_PAD_TOP = 8; // matches `.input` `py-2`
+const YAML_POPUP_MAX_HEIGHT = 176; // matches `max-h-44`
+
 export function YamlEditor({
   value,
   onChange,
@@ -714,10 +753,12 @@ export function YamlEditor({
   placeholder?: string;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
   const [caret, setCaret] = useState(0);
   const [open, setOpen] = useState(false);
   const [forced, setForced] = useState(false);
   const [selected, setSelected] = useState(0);
+  const [popupTop, setPopupTop] = useState(YAML_PAD_TOP);
 
   const suggestion = useMemo(() => suggest(value, caret), [value, caret]);
   const issues = useMemo(() => {
@@ -734,6 +775,23 @@ export function YamlEditor({
   const errors = issues.filter((issue) => issue.severity === 'error').length;
   const items = suggestion.items;
   const show = open && items.length > 0;
+
+  // Anchor the completion list to the caret line so it never covers the hint labels below
+  // the editor; flip above the caret when there is not enough room underneath.
+  useLayoutEffect(() => {
+    if (!show) return;
+    const el = ref.current;
+    const wrap = wrapRef.current;
+    if (!el || !wrap) return;
+    const line = value.slice(0, caret).split('\n').length - 1;
+    const caretTop = YAML_PAD_TOP + line * YAML_LINE_HEIGHT - el.scrollTop;
+    const below = caretTop + YAML_LINE_HEIGHT + 2;
+    const room = wrap.clientHeight;
+    const flip = below + YAML_POPUP_MAX_HEIGHT > room && caretTop - YAML_POPUP_MAX_HEIGHT - 2 > 0;
+    setPopupTop(flip
+      ? Math.max(2, caretTop - YAML_POPUP_MAX_HEIGHT - 2)
+      : Math.min(below, Math.max(2, room - YAML_POPUP_MAX_HEIGHT)));
+  }, [show, caret, value, items.length]);
 
   // Debounced server validation; the local lint already gives instant feedback.
   useEffect(() => {
@@ -760,7 +818,8 @@ export function YamlEditor({
   const apply = (completion: Completion) => {
     const el = ref.current;
     const start = suggestion.replaceFrom;
-    const end = el?.selectionStart ?? start + suggestion.prefix.length;
+    // `replaceFrom` is absolute; splice up to the caret (or the end of any selection).
+    const end = Math.max(start, el?.selectionEnd ?? start + suggestion.prefix.length);
     const next = value.slice(0, start) + completion.insertText + value.slice(end);
     onChange(next);
     setOpen(false);
@@ -807,8 +866,10 @@ export function YamlEditor({
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      const { insert, caret: caretOffset } = enterInsertion(value, start);
-      const next = value.slice(0, start) + insert + value.slice(end);
+      // Collapse a selection first so the rest of the line is not duplicated.
+      const base = start === end ? value : value.slice(0, start) + value.slice(end);
+      const { insert, caret: caretOffset } = enterInsertion(base, start);
+      const next = base.slice(0, start) + insert + base.slice(start);
       onChange(next);
       setOpen(false);
       placeCaret(start + caretOffset);
@@ -835,12 +896,13 @@ export function YamlEditor({
     const position = el?.selectionStart ?? next.length;
     setCaret(position);
     const next0 = suggest(next, position);
-    setOpen((forced || next0.prefix.length >= 1) && next0.items.length > 0);
+    setOpen((forced || (next0.auto && next0.prefix.length >= 1)) && next0.items.length > 0);
     setSelected(0);
   };
 
   return (
-    <div className={classNames('relative', className)}>
+    <div className={classNames('flex flex-col', className)}>
+      <div ref={wrapRef} className="relative min-h-0 flex-1">
       <textarea
         ref={ref}
         value={value}
@@ -859,7 +921,12 @@ export function YamlEditor({
       />
 
       {show && (
-        <div className="absolute inset-x-2 bottom-2 z-20 max-h-44 overflow-y-auto rounded-lg border border-ink-700 bg-ink-850/95 p-1 shadow-2xl backdrop-blur">
+        <div
+          role="listbox"
+          aria-label="Completions"
+          style={{ top: popupTop }}
+          className="absolute inset-x-2 z-20 max-h-44 overflow-y-auto rounded-lg border border-ink-700 bg-ink-850/95 p-1 shadow-2xl backdrop-blur"
+        >
           <div className="flex items-center gap-2 px-2 py-1 text-[10px] uppercase tracking-wide text-slate-400">
             <Icon name="sparkles" className="h-3 w-3" />
             <span className="truncate">{suggestion.context || 'document'}</span>
@@ -869,6 +936,8 @@ export function YamlEditor({
             <button
               key={item.label}
               type="button"
+              role="option"
+              aria-selected={index === selected}
               className={classNames(
                 'flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-xs',
                 index === selected ? 'bg-accent-muted/60 text-white' : 'text-slate-300 hover:bg-ink-800'
@@ -884,6 +953,7 @@ export function YamlEditor({
           ))}
         </div>
       )}
+      </div>
 
       <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
         <span>

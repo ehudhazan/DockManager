@@ -4,7 +4,7 @@ title: UI & UX conventions
 description: The design system, navigation model, and mobile behaviour of the eh.DockManager React client, including the icon set, info tooltips, clickable surfaces, and role-based views.
 tags: [ui, ux, frontend, react, design-system, mobile]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T20:20:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
 sources:
   - id: client-src
     resource: ../../src/eh.DockManager.Client/src
@@ -26,7 +26,7 @@ mobile. This concept records the conventions so later changes stay consistent.[^
 |------|------|
 | `src/App.tsx` | App shell (sidebar, top bar, bottom nav, command palette) plus every view and the terminal drawer |
 | `src/yaml.ts` | Compose schema tree, completion engine, smart Enter/Tab indentation and the local enum lint behind `YamlEditor` |
-| `src/ui.tsx` | Shared atoms: `InfoTip`, `StatusPill`, `RoleBadge`, `PageHeader`, `Section`, `StatTile`, `EmptyState`, `Sparkline`, `TrafficChart`, `Tabs`, `Toggle`, `Field`, `ConfirmButton`, `Modal`, `Callout`, `Skeleton`, `Expand`, `MetricRow`, `RefreshControl`, `usePersistentState`, `classNames`, `formatBytes`, `formatNumber`, `formatPercent`, `formatRate`, `formatDuration`, `intervalLabel`, `roleBlurb`, and the `Notify`/`OpenTerminal` prop types |
+| `src/ui.tsx` | Shared atoms: `InfoTip`, `StatusPill`, `RoleBadge`, `PageHeader`, `Section`, `StatTile`, `EmptyState`, `Sparkline`, `TrafficChart`, `MiniMetric`, `Tabs`, `Toggle`, `Field`, `ConfirmButton`, `Modal`, `Callout`, `Skeleton`, `Expand`, `MetricRow`, `RefreshControl`, `counterRate`, `usePersistentState`, `classNames`, `formatBytes`, `formatNumber`, `formatPercent`, `formatRate`, `formatDuration`, `intervalLabel`, `roleBlurb`, and the `Notify`/`OpenTerminal` prop types |
 | `src/icons.tsx` | Dependency-free 24x24 line-icon set (`Icon` + `IconName`), replacing the original emoji |
 | `src/index.css` | Tailwind layers plus focus rings, background gradient, thin mobile scrollbars, and min touch heights |
 | `src/api.ts`, `src/types.ts` | Typed REST client; `ViewKey` includes the new `users` and `settings` views |
@@ -99,6 +99,14 @@ mobile. This concept records the conventions so later changes stay consistent.[^
 * **Human-readable network labels.** Traffic is shown as In/Out rates and 1h/24h totals with named
   counters ("Receive drops", "Connection resets (established)", "Segments retransmitted"), never as bare
   rx/tx numbers; see [Network metrics & traffic history](/project/network-metrics.md).
+* **Expand panels carry charts, not just rows.** Anything that runs gets a chart inside its `Expand`
+  disclosure, so the panels stay calm until opened but are dense when they are: the Portal card's
+  **More info** shows live Network in/out and Disk read/write sparklines (from the 2 s stats stream) plus
+  process/thread, CPU-core, memory-peak and block-IO counters; the container **Inspect → Stats** tab adds a
+  **Disk throughput** chart beside the network chart; the Dashboard **Network traffic** panel adds host
+  load and process counters. Two shared atoms keep them consistent — `MiniMetric` (label + value +
+  `Sparkline`) and `counterRate` (cumulative counter → per-second rate, 0 on a counter reset). The same
+  pattern is the default for any new operational surface.
 * **Log timestamps.** The container-inspector log view has a **Show timestamps** checkbox (persisted as
   `ehdm.logs.timestamps`, default on) that maps to Docker's `timestamps` flag; stack/pod logs honour the
   same preference.

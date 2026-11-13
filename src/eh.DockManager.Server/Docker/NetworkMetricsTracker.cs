@@ -66,6 +66,21 @@ public sealed record HostTcpCounters(
     long InErrs,
     long OutRsts);
 
+/// <summary>Host load, process and memory counters read from <c>/proc</c> (host-wide, not namespaced).</summary>
+public sealed record HostSystemCounters(
+    double Load1,
+    double Load5,
+    double Load15,
+    long ProcessesRunning,
+    long ProcessesTotal,
+    long ProcessesBlocked,
+    long Forks,
+    long MemoryTotalKb,
+    long MemoryAvailableKb,
+    long SwapTotalKb,
+    long SwapFreeKb,
+    int CpuCores);
+
 /// <summary>Host-level network summary: 1h/24h totals, counters, interfaces, TCP health and the timeline.</summary>
 public sealed record NetworkSummaryResponse(
     long RxLast1hBytes,
@@ -82,6 +97,7 @@ public sealed record NetworkSummaryResponse(
     long TxDropped,
     HostTcpCounters? HostTcp,
     IReadOnlyList<NetworkInterfaceMetric> HostInterfaces,
+    HostSystemCounters? System,
     IReadOnlyList<NetworkHistoryPoint> History);
 
 /// <summary>Container-level network summary.</summary>
@@ -264,7 +280,7 @@ public sealed class NetworkMetricsTracker : BackgroundService
             last.RxPackets, last.TxPackets,
             last.RxErrors, last.TxErrors,
             last.RxDropped, last.TxDropped,
-            ReadHostTcpCounters(), ReadHostInterfaces(), history);
+            ReadHostTcpCounters(), ReadHostInterfaces(), ReadHostSystemCounters(), history);
     }
 
     /// <summary>Container-level summary (accepts a short id or a name prefix).</summary>
@@ -429,6 +445,83 @@ public sealed class NetworkMetricsTracker : BackgroundService
             /* ignore */
         }
         return result;
+    }
+
+    /// <summary>
+    /// Reads host load averages, process counts and memory from <c>/proc</c>. Inside a container these
+    /// files are not namespaced, so they describe the host (which is what a home-server operator wants).
+    /// </summary>
+    private static HostSystemCounters? ReadHostSystemCounters()
+    {
+        try
+        {
+            double load1 = 0, load5 = 0, load15 = 0;
+            long running = 0, total = 0, blocked = 0, forks = 0;
+
+            if (File.Exists("/proc/loadavg"))
+            {
+                var parts = File.ReadAllText("/proc/loadavg").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length >= 3)
+                {
+                    double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out load1);
+                    double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out load5);
+                    double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out load15);
+                }
+                if (parts.Length >= 4)
+                {
+                    var proc = parts[3].Split('/');
+                    if (proc.Length == 2)
+                    {
+                        long.TryParse(proc[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out running);
+                        long.TryParse(proc[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out total);
+                    }
+                }
+            }
+
+            if (File.Exists("/proc/stat"))
+            {
+                foreach (var line in File.ReadLines("/proc/stat"))
+                {
+                    if (line.StartsWith("procs_blocked ", StringComparison.Ordinal))
+                        long.TryParse(line.AsSpan(14).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out blocked);
+                    else if (line.StartsWith("processes ", StringComparison.Ordinal))
+                        long.TryParse(line.AsSpan(10).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out forks);
+                }
+            }
+
+            long memTotal = 0, memAvailable = 0, swapTotal = 0, swapFree = 0;
+            if (File.Exists("/proc/meminfo"))
+            {
+                foreach (var line in File.ReadLines("/proc/meminfo"))
+                {
+                    if (line.StartsWith("MemTotal:", StringComparison.Ordinal)) memTotal = ParseKb(line);
+                    else if (line.StartsWith("MemAvailable:", StringComparison.Ordinal)) memAvailable = ParseKb(line);
+                    else if (line.StartsWith("SwapTotal:", StringComparison.Ordinal)) swapTotal = ParseKb(line);
+                    else if (line.StartsWith("SwapFree:", StringComparison.Ordinal)) swapFree = ParseKb(line);
+                }
+            }
+
+            return new HostSystemCounters(
+                Math.Round(load1, 2), Math.Round(load5, 2), Math.Round(load15, 2),
+                running, total, blocked, forks,
+                memTotal, memAvailable, swapTotal, swapFree,
+                Math.Max(1, Environment.ProcessorCount));
+        }
+        catch
+        {
+            /* /proc unavailable in the sandbox/container */
+        }
+        return null;
+
+        static long ParseKb(string line)
+        {
+            var colon = line.IndexOf(':');
+            if (colon < 0) return 0;
+            var rest = line[(colon + 1)..].Trim();
+            var space = rest.IndexOf(' ');
+            var number = space > 0 ? rest[..space] : rest;
+            return long.TryParse(number, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : 0;
+        }
     }
 
     /// <summary>Parses one Docker <c>/stats</c> payload into the full metric set.</summary>

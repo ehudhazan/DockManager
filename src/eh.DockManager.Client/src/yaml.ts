@@ -30,8 +30,11 @@ export interface SuggestionState {
   kind: 'key' | 'value' | 'item' | 'none';
   context: string;
   prefix: string;
+  /** Absolute offset in the document where the completion should be spliced in. */
   replaceFrom: number;
   items: Completion[];
+  /** Whether the editor may open the list by itself once a prefix is typed. */
+  auto: boolean;
 }
 
 export interface YamlIssue {
@@ -269,25 +272,57 @@ function valueCompletions(node: SchemaNode, prefix: string): Completion[] {
 }
 
 /**
+ * Completions for a position inside a list item (a bare `- `), where the sequence's own
+ * `- ` template would be wrong: a scalar item offers its example/known values, and a
+ * mapping item offers its child keys.
+ */
+function itemCompletions(node: SchemaNode, prefix: string): Completion[] {
+  if (node.kind === 'map') return keyCompletions(node, prefix);
+  const lower = prefix.toLowerCase();
+  if (node.values && node.values.length > 0) {
+    return node.values
+      .filter((value) => value.toLowerCase().startsWith(lower))
+      .map((value) => ({ label: value, detail: 'valid value', insertText: value }));
+  }
+  if (node.example) {
+    return [{ label: node.example, detail: node.description ?? 'example item', insertText: node.example }];
+  }
+  return [];
+}
+
+/** Absolute document offset of the start of every line. */
+function lineStarts(lines: string[]): number[] {
+  const starts: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    starts.push(offset);
+    offset += line.length + 1;
+  }
+  return starts;
+}
+
+/**
  * Works out what the caret is editing and which completions apply.
- * `index`/`column` are 0-based line and column inside that line.
+ *
+ * `caret` is an absolute offset in `text`; the returned `replaceFrom` is absolute too, so
+ * callers can splice `text.slice(0, replaceFrom) + insertText + text.slice(end)` directly.
+ * (Returning a line-relative offset here once made applying a completion wipe everything
+ * before the caret.)
  */
 export function suggest(text: string, caret: number): SuggestionState {
   const lines = splitLines(text);
-  let offset = 0;
-  let index = 0;
-  for (let i = 0; i < lines.length; i++) {
-    if (caret <= offset + lines[i].length) {
+  const starts = lineStarts(lines);
+  // The caret belongs to the last line whose start is at or before it.
+  let index = lines.length - 1;
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (caret < starts[i + 1]) {
       index = i;
       break;
     }
-    offset += lines[i].length + 1;
-    index = i + 1;
   }
-  index = Math.min(index, lines.length - 1);
+  const lineStart = starts[index] ?? 0;
   const line = lines[index] ?? '';
-  const column = Math.max(0, Math.min(caret - offset, line.length));
-  const before = line.slice(0, column);
+  const column = Math.max(0, Math.min(caret - lineStart, line.length));
   const indent = indentOf(line);
   const body = line.slice(indent);
   const dash = /^-\s/.test(body) ? '- ' : '';
@@ -305,42 +340,54 @@ export function suggest(text: string, caret: number): SuggestionState {
     const valueStart = indent + dash.length + colonIndex + 1;
     const rawRest = line.slice(valueStart);
     const leading = /^\s*/.exec(rawRest)?.[0] ?? '';
-    const replaceFrom = valueStart + leading.length;
-    const prefix = line.slice(replaceFrom, column);
+    const replaceFrom = lineStart + valueStart + leading.length;
+    const prefix = line.slice(valueStart + leading.length, column);
     const node = resolveSchema([...path, key]);
+    let items = valueCompletions(node, prefix);
+    const empty = rawRest.trim().length === 0;
+    if (empty && (node.kind === 'map' || node.kind === 'sequence')) {
+      // Opening a mapping or a list: the child belongs on the next line, one level in.
+      const childIndent = ' '.repeat(indent + INDENT);
+      items = items.map((item) => ({ ...item, insertText: `\n${childIndent}${item.insertText}` }));
+    } else if (empty && leading.length === 0) {
+      // A scalar value written straight after the colon needs its separating space.
+      items = items.map((item) => ({ ...item, insertText: ` ${item.insertText}` }));
+    }
     return {
       kind: 'value',
       context: [...path, key].join(' → '),
       prefix,
       replaceFrom,
-      items: valueCompletions(node, prefix)
+      items,
+      auto: !!(node.values && node.values.length > 0)
     };
   }
 
-  // Bare list item (`- ` with no key yet): the item schema of the enclosing sequence.
+  // Bare list item (`- ` with no key yet): complete the item schema of the enclosing sequence.
   if (dash && afterDash.trim().length === 0) {
-    const sequenceNode = parent.kind === 'sequence' ? parent : parent;
-    const item = sequenceNode.kind === 'sequence' ? sequenceNode.item : undefined;
-    const replaceFrom = indent + dash.length;
+    const item = parent.kind === 'sequence' ? parent.item : undefined;
+    const replaceFrom = lineStart + indent + dash.length;
     return {
       kind: 'item',
       context: path.join(' → '),
       prefix: '',
       replaceFrom,
-      items: valueCompletions(sequenceNode, '')
+      items: item ? itemCompletions(item, '') : [],
+      auto: true
     };
   }
 
   // Key position (optionally a `- key:` item).
-  const replaceFrom = indent + dash.length;
-  const prefix = line.slice(replaceFrom, column);
+  const replaceFrom = lineStart + indent + dash.length;
+  const prefix = line.slice(indent + dash.length, column);
   const node = parent.kind === 'sequence' ? parent.item ?? scalar('') : parent;
   return {
     kind: 'key',
     context: path.join(' → ') || 'document',
     prefix,
     replaceFrom,
-    items: keyCompletions(node, prefix)
+    items: keyCompletions(node, prefix),
+    auto: true
   };
 }
 
@@ -390,10 +437,13 @@ export function enterInsertion(text: string, caret: number): { insert: string; c
   if (trimmed.startsWith('-')) {
     const body = trimmed.replace(/^-\s*/, '');
     const key = keyOf(`- ${body}`);
-    if (key && /:\s*$/.test(trimmed)) {
-      // `- key:` → children of the item's mapping
+    // A mapping entry inside the item (`- type: bind`) needs a space after the colon; a
+    // scalar with a colon (`- ./data:/data`, `- "8080:80"`) must not be mistaken for one.
+    const isMapEntry = key !== null && /:(\s|$)/.test(body.slice(key.length));
+    if (isMapEntry) {
       nextIndent = indent + INDENT;
-      continuation = childLinePrefix(key);
+      // `- key:` with no value opens the children; `- key: value` continues the properties.
+      if (/:\s*$/.test(trimmed)) continuation = childLinePrefix(key ?? '');
     } else {
       // another list item at the same level
       nextIndent = indent;

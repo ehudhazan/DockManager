@@ -168,10 +168,18 @@ export interface PasskeyInfo {
 export interface MetricSample {
   containerId: string;
   cpuPercent: number;
+  cpuCores: number;
   memoryMb: number;
   memoryLimitMb: number;
+  memoryPeakMb: number;
+  pidsCurrent: number;
+  pidsLimit: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
   networkRxBytes: number;
   networkTxBytes: number;
+  networkRxPackets: number;
+  networkTxPackets: number;
   timestamp: string;
 }
 
@@ -340,6 +348,21 @@ export interface HostTcpCounters {
   outRsts: number;
 }
 
+export interface HostSystemCounters {
+  load1: number;
+  load5: number;
+  load15: number;
+  processesRunning: number;
+  processesTotal: number;
+  processesBlocked: number;
+  forks: number;
+  memoryTotalKb: number;
+  memoryAvailableKb: number;
+  swapTotalKb: number;
+  swapFreeKb: number;
+  cpuCores: number;
+}
+
 export interface NetworkSummary {
   rxLast1hBytes: number;
   txLast1hBytes: number;
@@ -355,6 +378,7 @@ export interface NetworkSummary {
   txDropped: number;
   hostTcp?: HostTcpCounters | null;
   hostInterfaces: NetworkInterfaceMetric[];
+  system?: HostSystemCounters | null;
   history: NetworkHistoryPoint[];
 }
 

@@ -1,0 +1,28 @@
+# File: docker-compose.yml
+name: eh-dockmanager
+services:
+  eh-dockmanager:
+    build: .
+    image: eh-dockmanager:latest
+    container_name: eh-dockmanager
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "8443:8443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data:/data
+    group_add:
+      - "${DOCKER_GID:-999}"
+    environment:
+      - EHDM_DATA_DIR=/data
+      - EHDM_PORTAL_PORT=443
+      - EHDM_ADMIN_PORT=8443
+      - EHDM_LAN_IP=10.10.1.1
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m

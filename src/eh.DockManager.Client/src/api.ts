@@ -1,23 +1,35 @@
 // File: src/eh.DockManager.Client/src/api.ts
 import type {
+  AcmeConfig,
+  AcmeSettings,
   AuditLogEntry,
+  CertificateInfo,
+  ContainerMetricsResponse,
+  ContainerNetworkHistory,
   ConvertResult,
   CveFinding,
+  DashboardResponse,
   DockerContainerSummary,
   DockerHostInfo,
+  DockerImageSummary,
+  HealthInfo,
   KubeClusterInfo,
   LandingResponse,
   McpKeyInfo,
+  NetworkSummary,
   PasskeyInfo,
   PortalApp,
   RegistryInfo,
   SessionUser,
+  StackStats,
   StackSummary,
   SystemInfo,
+  SystemSettings,
   TarEntryInfo,
   UserInfo,
   WebhookInfo
 } from './types';
+import type { YamlIssue } from './yaml';
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
@@ -30,6 +42,14 @@ async function req<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
   }
   return body as T;
+}
+
+/** Raw-text request for endpoints that return YAML/plain text rather than JSON. */
+async function reqText(path: string, init: RequestInit = {}): Promise<string> {
+  const response = await fetch(path, { credentials: 'same-origin', ...init });
+  const body = await response.text();
+  if (!response.ok) throw new Error(body || `${response.status} ${response.statusText}`);
+  return body;
 }
 
 function safeParse(text: string): Record<string, unknown> {
@@ -73,6 +93,15 @@ export const api = {
 
   // ── System ──────────────────────────────────────────────────────────────
   systemInfo: () => get<SystemInfo>('/api/system/info'),
+  health: () => get<HealthInfo>('/api/system/health'),
+  network: (hostId?: number) => get<NetworkSummary>(`/api/system/network${hostId ? `?hostId=${hostId}` : ''}`),
+  dashboard: (hostId?: number, fresh = false) => {
+    const params = new URLSearchParams();
+    if (hostId) params.set('hostId', String(hostId));
+    if (fresh) params.set('fresh', 'true');
+    const query = params.toString();
+    return get<DashboardResponse>(`/api/system/dashboard${query ? `?${query}` : ''}`);
+  },
   audit: (limit = 200) => get<AuditLogEntry[]>(`/api/system/audit?limit=${limit}`),
   sslRegenerate: (dnsNames: string[], ipAddresses: string[]) =>
     post<{ ok: boolean; subject: string; thumbprint: string; expires: string }>('/api/system/ssl/regenerate', {
@@ -80,17 +109,35 @@ export const api = {
       ipAddresses
     }),
   sslDownloadUrl: '/api/system/ssl/download',
+  systemSettings: () => get<SystemSettings>('/api/system/settings'),
+  saveSystemSettings: (payload: { portalDomain?: string; lanIp?: string; regenerateCertificate?: boolean }) =>
+    put<{ ok: boolean; portalDomain: string; certificate: CertificateInfo }>('/api/system/settings', payload),
+
+  // ── Let's Encrypt (ACME) ────────────────────────────────────────────────
+  acmeSettings: () => get<AcmeSettings>('/api/system/acme'),
+  saveAcme: (payload: Partial<AcmeConfig>) =>
+    put<{ saved: boolean; directory: string }>('/api/system/acme', payload),
+  issueAcme: () =>
+    post<{ ok: boolean; domains: string[]; notAfter?: string | null; error?: string | null }>('/api/system/acme/issue'),
 
   // ── Portal ──────────────────────────────────────────────────────────────
-  landing: () => get<LandingResponse>('/api/portal/landing'),
+  landing: (includeHidden = false) =>
+    get<LandingResponse>(`/api/portal/landing${includeHidden ? '?includeHidden=true' : ''}`),
   portalApps: () => get<PortalApp[]>('/api/portal/apps'),
   savePortalApp: (app: Partial<PortalApp>) => put<{ id: number; subdomain: string }>('/api/portal/apps', app),
   deletePortalApp: (subdomain: string) => del<{ deleted: boolean }>(`/api/portal/apps/${subdomain}`),
+  reorderPortalApps: (order: string[]) => post<{ reordered: number }>('/api/portal/apps/reorder', { order }),
   refreshPortal: () => post<{ refreshed: boolean }>('/api/portal/refresh'),
 
   // ── Stacks ──────────────────────────────────────────────────────────────
   stacks: () => get<StackSummary[]>('/api/stacks'),
   stack: (name: string) => get<{ name: string; yaml: string; meta: unknown }>(`/api/stacks/${name}`),
+  stackStats: (name: string) => get<StackStats>(`/api/stacks/${name}/stats`),
+  validateStack: (yaml: string) =>
+    post<{ valid: boolean; name?: string | null; serviceCount: number; issues: YamlIssue[] }>(
+      '/api/stacks/validate',
+      { yaml }
+    ),
   saveStack: (name: string, payload: Record<string, unknown>) => put<{ saved: boolean }>(`/api/stacks/${name}`, payload),
   deleteStack: (name: string) => del<{ deleted: boolean }>(`/api/stacks/${name}`),
   deployStack: (name: string) => post<unknown>(`/api/stacks/${name}/deploy`),
@@ -99,7 +146,7 @@ export const api = {
     put<{ saved: boolean }>(`/api/stacks/${name}/autoupdate`, payload),
   convertDockerRun: (command: string) => post<ConvertResult>('/api/stacks/convert/docker-run', { source: command }),
   convertToK8s: (payload: { source?: string; name?: string }) =>
-    req<string>('/api/stacks/convert/compose-to-k8s', {
+    reqText('/api/stacks/convert/compose-to-k8s', {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify(payload)
@@ -116,8 +163,11 @@ export const api = {
     post<{ ok: boolean }>(`/api/containers/${encodeURIComponent(id)}/action${hostId ? `?hostId=${hostId}` : ''}`, {
       action
     }),
-  logsUrl: (id: string, tail = 300) => `/api/containers/${encodeURIComponent(id)}/logs?tail=${tail}`,
+  logsUrl: (id: string, tail = 300, timestamps = false) =>
+    `/api/containers/${encodeURIComponent(id)}/logs?tail=${tail}&timestamps=${timestamps ? 1 : 0}`,
   statsUrl: (id: string) => `/api/containers/${encodeURIComponent(id)}/stats`,
+  containerMetrics: (id: string) => get<ContainerMetricsResponse>(`/api/containers/${encodeURIComponent(id)}/metrics`),
+  containerNetwork: (id: string) => get<ContainerNetworkHistory>(`/api/containers/${encodeURIComponent(id)}/network`),
   execUrl: (id: string, cmd: string) =>
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/exec/${encodeURIComponent(id)}?cmd=${encodeURIComponent(cmd)}`,
   archiveList: (id: string, path: string) =>
@@ -129,9 +179,7 @@ export const api = {
 
   // ── Images & registries ─────────────────────────────────────────────────
   images: (hostId?: number) =>
-    get<{ Id: string; RepoTags?: string[]; Size: number; Containers: number }[]>(
-      `/api/images${hostId ? `?hostId=${hostId}` : ''}`
-    ),
+    get<DockerImageSummary[]>(`/api/images${hostId ? `?hostId=${hostId}` : ''}`),
   pruneImages: (dangling: boolean) =>
     post<{ ImagesDeleted?: unknown[]; SpaceReclaimed?: number }>(`/api/images/prune?dangling=${dangling}`),
   pullUrl: (image: string, tag = 'latest', registryId?: number) =>
@@ -140,6 +188,15 @@ export const api = {
   pullImage: (image: string, tag: string, registryId?: number) =>
     post<unknown>('/api/images/pull', { image, tag, registryId }),
   removeImage: (id: string) => del<{ removed: boolean }>(`/api/images/${encodeURIComponent(id)}`),
+  runImage: (payload: {
+    image: string;
+    name?: string;
+    command?: string;
+    env?: string[];
+    ports?: string[];
+    restartPolicy?: string;
+    start?: boolean;
+  }) => post<{ id: string; name: string }>('/api/containers', payload),
   registries: () => get<RegistryInfo[]>('/api/registries'),
   saveRegistry: (payload: Record<string, unknown>) => post<{ id: number }>('/api/registries', payload),
   deleteRegistry: (id: number) => del<{ deleted: boolean }>(`/api/registries/${id}`),
@@ -164,6 +221,7 @@ export const api = {
   saveCluster: (payload: Record<string, unknown>) => post<{ id: number }>('/api/clusters', payload),
   deleteCluster: (id: number) => del<{ deleted: boolean }>(`/api/clusters/${id}`),
   testCluster: (id: number) => post<{ online: boolean }>(`/api/clusters/${id}/test`),
+  namespaces: (id: number) => get<{ items?: unknown[] }>(`/api/clusters/${id}/namespaces`),
   pods: (id: number, namespace = '') =>
     get<{ items?: unknown[] }>(`/api/clusters/${id}/pods${namespace ? `?namespace=${namespace}` : ''}`),
   deployments: (id: number, namespace = '') =>
@@ -189,6 +247,10 @@ export const api = {
   users: () => get<UserInfo[]>('/api/users'),
   pendingUsers: () => get<UserInfo[]>('/api/users/pending'),
   approveUser: (id: number, role: string) => post<{ approved: boolean }>(`/api/users/${id}/approve`, { role }),
+  updateUser: (id: number, payload: { role?: string; disabled?: boolean }) =>
+    put<{ updated: boolean; role: string; disabled: boolean }>(`/api/users/${id}`, payload),
+  createUser: (payload: { username: string; password: string; email?: string; role?: string }) =>
+    post<{ id: number; username: string; role: string }>('/api/users', payload),
   deleteUser: (id: number) => del<{ deleted: boolean }>(`/api/users/${id}`),
   mcpKeys: () =>
     get<{ id: number; name: string; prefix: string; scopes: string; enabled: boolean; createdAt: string }[]>(
@@ -196,6 +258,10 @@ export const api = {
     ),
   createMcpKey: (name: string, scopes: string) =>
     post<{ id: number; name: string; token: string }>('/api/mcp/keys', { name, scopes }),
+  updateMcpKey: (id: number, payload: { name?: string; enabled?: boolean; scopes?: string }) =>
+    put<{ updated: boolean; id: number; name: string; scopes: string; enabled: boolean }>(`/api/mcp/keys/${id}`, payload),
+  rotateMcpKey: (id: number) =>
+    post<{ id: number; name: string; token: string }>(`/api/mcp/keys/${id}/rotate`),
   deleteMcpKey: (id: number) => del<{ deleted: boolean }>(`/api/mcp/keys/${id}`),
 
   // ── SSO configuration ───────────────────────────────────────────────────

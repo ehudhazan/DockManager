@@ -898,6 +898,16 @@ public sealed class SqliteWalStore
         => await QuerySingleAsync("SELECT * FROM McpApiKeys WHERE TokenHash=$h AND Enabled=1", MapKey, ct,
             ("$h", tokenHash)).ConfigureAwait(false);
 
+    public async Task<McpApiKey?> GetMcpApiKeyByIdAsync(long id, CancellationToken ct = default)
+        => await QuerySingleAsync("SELECT * FROM McpApiKeys WHERE Id=$id", MapKey, ct, ("$id", id)).ConfigureAwait(false);
+
+    public Task UpsertMcpApiKeyAsync(McpApiKey k, CancellationToken ct = default)
+        => ExecAsync(
+            "UPDATE McpApiKeys SET Name=$n, Prefix=$p, TokenHash=$h, Scopes=$s, Enabled=$e, LastUsedAt=$l WHERE Id=$id",
+            ct, ("$n", k.Name), ("$p", k.Prefix), ("$h", k.TokenHash), ("$s", k.Scopes),
+            ("$e", k.Enabled ? 1 : 0), ("$l", k.LastUsedAt.HasValue ? Iso(k.LastUsedAt.Value) : null),
+            ("$id", k.Id));
+
     public Task TouchMcpApiKeyAsync(long id, CancellationToken ct = default)
         => ExecAsync("UPDATE McpApiKeys SET LastUsedAt=$t WHERE Id=$id", ct, ("$t", Iso(DateTimeOffset.UtcNow)), ("$id", id));
 

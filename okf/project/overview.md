@@ -4,7 +4,7 @@ title: eh.DockManager
 description: Home-server and enterprise container/cluster control plane, port 443 reverse proxy and app portal, auto-updater, and MCP server built on .NET 11 and React 19.
 tags: [project, dockmanager, architecture]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:28:57Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T19:45:00Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -40,8 +40,9 @@ build rules.[^prompt-md]
 | Compose stacks | Compose file storage on disk, selective recreate by image hash, `docker run` ↔ Compose ↔ Kubernetes conversion |
 | Auto-updater | Per-stack image pulls, 25-second health guard, automatic rollback, image pruning |
 | Auth & SSO | Local password, passkeys/WebAuthn, TOTP, Google/Microsoft OIDC, SAML 2.0 SP and IdP |
-| MCP server & webhooks | `/mcp` JSON-RPC 2.0 over scoped bearer tokens, multi-provider webhook notifications |
-| Frontend | Vite + React 19 + TypeScript + Tailwind, eight views, PC and mobile experiences |
+| MCP server & webhooks | `/mcp` JSON-RPC 2.0 over scoped bearer tokens, multi-provider webhook notifications; users are manageable over MCP except Admin accounts |
+| Network metrics | 24-hour in-memory traffic history per host and container: rates, 1h/24h totals, drops/errors and TCP connection resets |
+| Frontend | Vite + React 19 + TypeScript + Tailwind; ten views (adds Users and Settings), a line-icon set, info tooltips, expandable operational panels, persisted refresh intervals, role-aware navigation, clickable dashboard tiles, PC and mobile experiences |
 
 # Repository layout
 
@@ -49,9 +50,9 @@ build rules.[^prompt-md]
 |------|----------|
 | `PROMPT.md` | Build brief and requirements (normative) |
 | `global.json` | .NET SDK pin (`11.0.100`, `rollForward: latestMajor`) |
-| `opencode.json` | OpenCode configuration (DebugMCP and Chrome DevTools MCP servers) |
-| `src/eh.DockManager.Server/` | ASP.NET Core server, implemented: `Program.cs` (hosts everything), `Models/DomainModels.cs`, `Data/SqliteWalStore.cs`, `Security/{CryptoAndCertManager,AuthAndSsoEngine,QrCodeGenerator}.cs`, `Docker/{DockerSocketClient,DockerStreamDemuxer}.cs`, `Stacks/ComposeAndConverters.cs`, `Kubernetes/KubeClusterService.cs`, `Portal/YarpPortalProxy.cs`, `McpAndWebhooks/McpAndWebhookEngine.cs` |
-| `src/eh.DockManager.Client/` | Vite + React 19 + Tailwind client, implemented: `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `tsconfig.json`, and `src/{main.tsx,App.tsx,api.ts,types.ts,index.css}` |
+| `opencode.json` | OpenCode configuration (default model `openrouter/deepseek/deepseek-v4.1-flash`; DebugMCP and Chrome DevTools MCP servers) |
+| `src/eh.DockManager.Server/` | ASP.NET Core server, implemented: `Program.cs` (hosts everything), `Models/DomainModels.cs`, `Data/SqliteWalStore.cs`, `Security/{CryptoAndCertManager,AuthAndSsoEngine,QrCodeGenerator,AcmeClient}.cs`, `Docker/{DockerSocketClient,DockerStreamDemuxer,NetworkMetricsTracker}.cs`, `Stacks/ComposeAndConverters.cs`, `Kubernetes/KubeClusterService.cs`, `Portal/YarpPortalProxy.cs`, `McpAndWebhooks/McpAndWebhookEngine.cs` |
+| `src/eh.DockManager.Client/` | Vite + React 19 + Tailwind client, implemented: `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `tsconfig.json`, and `src/{main.tsx,App.tsx,ui.tsx,icons.tsx,api.ts,types.ts,index.css}` (see [UI & UX conventions](/project/ui-ux.md)) |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Multi-stage build and deployment; `.env.example` is the host-local template (the real `.env` is gitignored) |
 | `AGENTS.md` | Binding knowledge-workflow rules for every agent |
 | `okf/` | This knowledge bundle |
@@ -72,6 +73,8 @@ runtime behaviours exercised, and the deviations discovered during the build).
   [Agent environment guardrails](/environment/guardrails.md).
 * Browser automation against a laptop Chrome from this host:
   [Chrome DevTools MCP over an SSH reverse tunnel](/environment/chrome-mcp-over-ssh.md).
+* Default model for agent sessions in this repository:
+  [OpenCode default model](/environment/opencode-default-model.md).
 
 # Notes
 

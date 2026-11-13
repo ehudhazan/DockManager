@@ -168,13 +168,13 @@ public sealed class KubeClusterService
     }
 
     public async Task<string> GetPodLogsAsync(KubeCluster cluster, string pod, string ns, string? container,
-        int tailLines = 500, CancellationToken ct = default)
+        int tailLines = 500, CancellationToken ct = default, bool timestamps = true)
     {
         var client = BuildClient(cluster);
         var response = await client.CoreV1.ReadNamespacedPodLogWithHttpMessagesAsync(
             pod, ns, container, follow: false, insecureSkipTLSVerifyBackend: null, limitBytes: null,
             pretty: null, previous: null, sinceSeconds: null, stream: null, tailLines: tailLines,
-            timestamps: true, cancellationToken: ct).ConfigureAwait(false);
+            timestamps: timestamps, cancellationToken: ct).ConfigureAwait(false);
         if (response.Body is null) return string.Empty;
         using var reader = new StreamReader(response.Body);
         return await reader.ReadToEndAsync(ct).ConfigureAwait(false);

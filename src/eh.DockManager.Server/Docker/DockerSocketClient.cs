@@ -220,8 +220,10 @@ public sealed class DockerSocketClient : IDisposable
 
     // ── Containers ────────────────────────────────────────────────────────
 
+    /// <summary>Lists containers. <c>size=1</c> adds <c>SizeRw</c>/<c>SizeRootFs</c> so the UI can
+    /// show the writable-layer size without a second request per container.</summary>
     public async Task<JsonDocument> ListContainersAsync(bool all = true, CancellationToken ct = default)
-        => await GetJsonAsync($"/containers/json?all={(all ? "1" : "0")}", ct).ConfigureAwait(false);
+        => await GetJsonAsync($"/containers/json?all={(all ? "1" : "0")}&size=1", ct).ConfigureAwait(false);
 
     public async Task<JsonDocument> InspectContainerAsync(string id, CancellationToken ct = default)
         => await GetJsonOrNullAsync($"/containers/{Uri.EscapeDataString(id)}/json", ct).ConfigureAwait(false);
@@ -376,20 +378,40 @@ public sealed class DockerSocketClient : IDisposable
         }
     }
 
-    /// <summary>Lists directory entries inside a container by reading the returned tar stream.</summary>
+    /// <summary>Lists the immediate children of a directory inside a container by reading the tar stream.</summary>
     public async Task<List<TarEntryInfo>> ListArchiveAsync(string containerId, string path, CancellationToken ct = default)
     {
         await using var stream = await GetArchiveAsync(containerId, path, ct).ConfigureAwait(false);
         var entries = new List<TarEntryInfo>();
+        var baseName = path.Trim('/');
+        var prefix = baseName.Length == 0 ? string.Empty : baseName + "/";
+        var visited = 0;
         await using var reader = new TarReader(stream, leaveOpen: false);
         while (await reader.GetNextEntryAsync(cancellationToken: ct).ConfigureAwait(false) is { } entry)
         {
-            entries.Add(new TarEntryInfo(
-                entry.Name.TrimEnd('/'),
-                entry.EntryType is TarEntryType.Directory,
-                entry.Length,
-                entry.ModificationTime,
-                entry.Mode.ToString()));
+            // Docker returns the directory and its whole subtree; a file browser only needs one level.
+            if (++visited > 50_000) break;
+            var name = entry.Name.Replace('\\', '/').Trim('/');
+            if (name.StartsWith("./", StringComparison.Ordinal)) name = name[2..];
+            string? relative = null;
+            if (name.Length > 0)
+            {
+                if (prefix.Length == 0)
+                {
+                    if (!name.Contains('/')) relative = name;
+                }
+                else if (name.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    var rest = name[prefix.Length..];
+                    if (rest.Length > 0 && !rest.Contains('/')) relative = rest;
+                }
+            }
+            if (relative is not null)
+            {
+                var fullPath = "/" + (prefix.Length == 0 ? relative : prefix + relative);
+                var isDirectory = entry.EntryType is TarEntryType.Directory or TarEntryType.DirectoryList;
+                entries.Add(new TarEntryInfo(fullPath, isDirectory, entry.Length, entry.ModificationTime, entry.Mode.ToString()));
+            }
             if (entry.DataStream is not null)
                 await entry.DataStream.CopyToAsync(Stream.Null, ct).ConfigureAwait(false);
         }

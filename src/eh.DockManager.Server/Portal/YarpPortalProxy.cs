@@ -57,7 +57,7 @@ public sealed class PortalProxyConfigurator
     private readonly SqliteWalStore _store;
     private readonly DynamicProxyConfigProvider _provider;
     private readonly ILogger<PortalProxyConfigurator> _log;
-    private readonly string _portalDomain;
+    private volatile string _portalDomain;
 
     public PortalProxyConfigurator(SqliteWalStore store, DynamicProxyConfigProvider provider,
         IConfiguration configuration, ILogger<PortalProxyConfigurator> log)
@@ -70,13 +70,27 @@ public sealed class PortalProxyConfigurator
 
     public string PortalDomain => _portalDomain;
 
+    /// <summary>Persists a new portal domain and rebuilds the proxy routes so every subdomain follows it.</summary>
+    public async Task SetPortalDomainAsync(string domain, CancellationToken ct = default)
+    {
+        var normalized = domain.Trim().Trim('.').ToLowerInvariant();
+        if (normalized.Length == 0) return;
+        await _store.SetConfigAsync("portal.domain", normalized, ct).ConfigureAwait(false);
+        _portalDomain = normalized;
+        await RebuildAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task RebuildAsync(CancellationToken ct = default)
     {
+        var persistedDomain = await _store.GetConfigAsync("portal.domain", ct).ConfigureAwait(false);
+        if (!string.IsNullOrWhiteSpace(persistedDomain)) _portalDomain = persistedDomain.Trim();
         var apps = await _store.GetPortalAppsAsync(ct).ConfigureAwait(false);
         var clusters = new List<ClusterConfig>();
         var routes = new List<RouteConfig>();
 
-        foreach (var app in apps.Where(a => !a.Hidden))
+        // Hidden apps are only removed from the landing page; their route is kept so the
+        // published URL keeps working (an admin unhides them again from the Portal view).
+        foreach (var app in apps)
         {
             var address = ResolveAddress(app);
             if (address is null)

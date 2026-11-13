@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Maskable icon: artwork kept inside the safe zone so any launcher mask looks right. -->
+  <rect width="512" height="512" fill="#0b0f17"/>
+  <g stroke="#38bdf8" stroke-width="26" stroke-linecap="round" fill="none">
+    <path d="M160 300h192"/>
+    <path d="M160 256h128"/>
+    <path d="M160 212h192"/>
+  </g>
+</svg>

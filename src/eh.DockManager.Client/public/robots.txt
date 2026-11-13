@@ -1,0 +1,3 @@
+# eh.DockManager is a private control plane — never index it.
+User-agent: *
+Disallow: /

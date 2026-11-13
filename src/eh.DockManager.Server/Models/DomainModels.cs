@@ -353,8 +353,13 @@ public sealed class AcmeConfig
     public bool Enabled { get; set; }
     public string Email { get; set; } = string.Empty;
     public string DirectoryUrl { get; set; } = "https://acme-v02.api.letsencrypt.org/directory";
+    /// <summary>Comma-separated domains; the first is the CN and the rest are SANs.</summary>
     public string Domain { get; set; } = string.Empty;
     public bool UseStaging { get; set; }
+
+    /// <summary>Last issuance failure, surfaced in the UI (not a credential).</summary>
+    public string? LastError { get; set; }
+    public DateTimeOffset? LastIssuedAt { get; set; }
 }
 
 public sealed class StoredConfig

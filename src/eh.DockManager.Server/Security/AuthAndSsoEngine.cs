@@ -697,11 +697,16 @@ public sealed class PasskeyService
 
     private sealed record Ceremony(string OptionsJson, long? UserId, DateTimeOffset Expires);
 
-    public PasskeyService(SqliteWalStore store, IConfiguration configuration, ILogger<PasskeyService> log)
+    public PasskeyService(SqliteWalStore store, IConfiguration configuration,
+        Portal.PortalProxyConfigurator portal, ILogger<PasskeyService> log)
     {
         _store = store;
         _log = log;
-        var domain = configuration["EHDM_PORTAL_DOMAIN"] ?? EhConstants.DefaultPortalDomain;
+        // Follow the *configured* portal domain (persisted value wins over the environment
+        // variable) so the WebAuthn RP ID matches the host the browser actually visits.
+        var domain = string.IsNullOrWhiteSpace(portal.PortalDomain)
+            ? EhConstants.DefaultPortalDomain
+            : portal.PortalDomain;
         var origins = (configuration["EHDM_ORIGINS"] ?? $"https://{domain}")
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         _fido2 = new Fido2(new Fido2Configuration

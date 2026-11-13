@@ -57,8 +57,24 @@ export interface DockerContainerSummary {
   ImageID: string;
   State: string;
   Status: string;
+  Created?: number;
+  SizeRw?: number;
+  SizeRootFs?: number;
   Labels?: Record<string, string>;
   Ports?: { PrivatePort?: number; PublicPort?: number; Type?: string; IP?: string }[];
+}
+
+export interface DockerImageSummary {
+  Id: string;
+  RepoTags?: string[] | null;
+  RepoDigests?: string[] | null;
+  Created?: number;
+  Size: number;
+  SharedSize?: number;
+  VirtualSize?: number;
+  Containers: number;
+  ContainersNames?: string[];
+  Labels?: Record<string, string> | null;
 }
 
 export interface RegistryInfo {
@@ -78,6 +94,8 @@ export interface DockerHostInfo {
   endpoint: string;
   enabled: boolean;
   wakeOnLanMac?: string | null;
+  wakeOnLanBroadcast?: string | null;
+  wakeOnLanPort?: number | null;
   lastSeenAt?: string | null;
   lastError?: string | null;
 }
@@ -180,6 +198,8 @@ export interface ConvertResult {
 
 export interface SystemInfo {
   version: string;
+  appVersion?: string;
+  bootId?: string;
   portalDomain: string;
   dataDirectory: string;
   uptimeSeconds: number;
@@ -191,6 +211,275 @@ export interface SystemInfo {
   authentication: boolean;
 }
 
+export interface HealthInfo {
+  status: string;
+  time: string;
+  appVersion: string;
+  bootId: string;
+}
+
+export interface CertificateInfo {
+  subject: string;
+  thumbprint: string;
+  notAfter: string;
+  dnsNames: string[];
+  ipAddresses: string[];
+}
+
+export interface SystemSettings {
+  portalDomain: string;
+  portalDomainSource: string;
+  portalDomainFromEnv: string;
+  lanIp: string;
+  dataDirectory: string;
+  version: string;
+  certificate: CertificateInfo;
+}
+
+export interface AcmeConfig {
+  enabled: boolean;
+  email: string;
+  directoryUrl: string;
+  domain: string;
+  useStaging: boolean;
+  lastError?: string | null;
+  lastIssuedAt?: string | null;
+}
+
+export interface AcmeSettings {
+  config: AcmeConfig;
+  directory: string;
+  active: boolean;
+  certificate: { subject: string; notAfter: string; dnsNames: string[]; ipAddresses: string[] };
+}
+
+export interface DashboardContainerInfo {
+  id: string;
+  name: string;
+  image: string;
+  state: string;
+  status: string;
+  cpuPercent: number;
+  cpuCores: number;
+  cpuThrottledPeriods: number;
+  cpuThrottledMs: number;
+  memoryMb: number;
+  memoryLimitMb: number;
+  memoryPeakMb: number;
+  memoryFailCount: number;
+  pidsCurrent: number;
+  pidsLimit: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  networkRxPackets: number;
+  networkTxPackets: number;
+  networkRxErrors: number;
+  networkTxErrors: number;
+  networkRxDropped: number;
+  networkTxDropped: number;
+  sizeRwBytes: number;
+  sizeRootFsBytes: number;
+  ports: string[];
+  created: string;
+}
+
+export interface DashboardOverall {
+  containersTotal: number;
+  containersRunning: number;
+  containersPaused: number;
+  containersStopped: number;
+  images: number;
+  cpuPercent: number;
+  cpuCores: number;
+  memoryUsedMb: number;
+  memoryTotalMb: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  publishedPorts: number;
+  diskImagesBytes: number;
+  diskContainersBytes: number;
+  diskVolumesBytes: number;
+  diskBuildCacheBytes: number;
+  diskTotalBytes: number;
+}
+
+export interface NetworkInterfaceMetric {
+  name: string;
+  rxBytes: number;
+  txBytes: number;
+  rxPackets: number;
+  txPackets: number;
+  rxErrors: number;
+  txErrors: number;
+  rxDropped: number;
+  txDropped: number;
+}
+
+export interface NetworkHistoryPoint {
+  timestamp: string;
+  rxBytes: number;
+  txBytes: number;
+  rxBytesPerSec: number;
+  txBytesPerSec: number;
+  rxErrors: number;
+  txErrors: number;
+  rxDropped: number;
+  txDropped: number;
+}
+
+export interface HostTcpCounters {
+  currEstab: number;
+  activeOpens: number;
+  passiveOpens: number;
+  attemptFails: number;
+  estabResets: number;
+  retransSegs: number;
+  inErrs: number;
+  outRsts: number;
+}
+
+export interface NetworkSummary {
+  rxLast1hBytes: number;
+  txLast1hBytes: number;
+  rxLast24hBytes: number;
+  txLast24hBytes: number;
+  trackingMinutes: number;
+  trackingSince?: string | null;
+  rxPackets: number;
+  txPackets: number;
+  rxErrors: number;
+  txErrors: number;
+  rxDropped: number;
+  txDropped: number;
+  hostTcp?: HostTcpCounters | null;
+  hostInterfaces: NetworkInterfaceMetric[];
+  history: NetworkHistoryPoint[];
+}
+
+export interface ContainerNetworkHistory {
+  containerId: string;
+  rxLast1hBytes: number;
+  txLast1hBytes: number;
+  rxLast24hBytes: number;
+  txLast24hBytes: number;
+  trackingMinutes: number;
+  trackingSince?: string | null;
+  history: NetworkHistoryPoint[];
+}
+
+export interface ExtendedContainerMetric {
+  containerId: string;
+  cpuPercent: number;
+  cpuCores: number;
+  cpuThrottledPeriods: number;
+  cpuThrottledMs: number;
+  memoryMb: number;
+  memoryLimitMb: number;
+  memoryPeakMb: number;
+  memoryFailCount: number;
+  pidsCurrent: number;
+  pidsLimit: number;
+  blockReadBytes: number;
+  blockWriteBytes: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  networkRxPackets: number;
+  networkTxPackets: number;
+  networkRxErrors: number;
+  networkTxErrors: number;
+  networkRxDropped: number;
+  networkTxDropped: number;
+  interfaces: NetworkInterfaceMetric[];
+}
+
+export interface ContainerMetricsResponse {
+  stats?: ExtendedContainerMetric | null;
+  network: ContainerNetworkHistory;
+}
+
+export interface StackServiceStats {
+  name: string;
+  container: string;
+  image?: string | null;
+  state: string;
+  status: string;
+  health: string;
+  startedAt?: string | null;
+  restartCount: number;
+  cpuPercent: number;
+  cpuCores: number;
+  memoryMb: number;
+  memoryLimitMb: number;
+  memoryPeakMb: number;
+  pidsCurrent: number;
+  sizeRwBytes: number;
+  networkRxBytes: number;
+  networkTxBytes: number;
+  networkRxErrors: number;
+  networkTxErrors: number;
+  networkRxDropped: number;
+  networkTxDropped: number;
+  ports: string[];
+}
+
+export interface StackStats {
+  name: string;
+  state: string;
+  services: StackServiceStats[];
+  totals: {
+    servicesTotal: number;
+    servicesRunning: number;
+    cpuPercent: number;
+    memoryMb: number;
+    memoryLimitMb: number;
+    networkRxBytes: number;
+    networkTxBytes: number;
+    sizeRwBytes: number;
+    restartCount: number;
+  };
+  autoUpdate: {
+    enabled: boolean;
+    intervalMinutes: number;
+    pruneOldImages: boolean;
+    rollbackOnFailure: boolean;
+    lastDeployedAt?: string | null;
+    lastUpdatedAt?: string | null;
+    lastUpdateCheckAt?: string | null;
+    updateCount: number;
+    rollbackCount: number;
+    lastError?: string | null;
+  };
+}
+
+export interface DashboardHostPanel {
+  id?: number | null;
+  name: string;
+  kind: string;
+  enabled: boolean;
+  online: boolean;
+  containersTotal: number;
+  containersRunning: number;
+  images: number;
+  cpuPercent: number;
+  cpuCores: number;
+  memoryUsedMb: number;
+  memoryTotalMb: number;
+  diskUsedBytes: number;
+  error?: string | null;
+}
+
+export interface DashboardResponse {
+  generatedAt: string;
+  hostId?: number | null;
+  hostName: string;
+  overall: DashboardOverall;
+  containers: DashboardContainerInfo[];
+  hosts: DashboardHostPanel[];
+  network?: NetworkSummary;
+}
+
 export type ViewKey =
   | 'portal'
   | 'dashboard'
@@ -199,4 +488,6 @@ export type ViewKey =
   | 'kubernetes'
   | 'images'
   | 'hosts'
-  | 'security';
+  | 'users'
+  | 'security'
+  | 'settings';

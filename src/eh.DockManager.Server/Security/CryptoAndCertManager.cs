@@ -100,7 +100,10 @@ public sealed class CertificateManager
     private readonly string _tlsPfxPath;
     private readonly string _clientsDir;
     private readonly string _sanManifestPath;
+    private readonly string _acmeStatePath;
+    private readonly string _acmeChainPath;
     private readonly ILogger<CertificateManager> _log;
+    private volatile string _portalDomain;
 
     private X509Certificate2 _caCertificate;
     private X509Certificate2? _serverCertificate;
@@ -110,15 +113,22 @@ public sealed class CertificateManager
     private const string CaCertPassword = "eh-dockmanager-ca";
     private const string TlsCertPassword = "eh-dockmanager-tls";
 
-    public CertificateManager(ILogger<CertificateManager> log, string? certsDir = null)
+    public CertificateManager(ILogger<CertificateManager> log, string? certsDir = null, string? portalDomain = null)
     {
         _log = log;
+        _portalDomain = string.IsNullOrWhiteSpace(portalDomain)
+            ? (Environment.GetEnvironmentVariable("EHDM_PORTAL_DOMAIN") is { Length: > 0 } envDomain
+                ? envDomain.Trim()
+                : EhConstants.DefaultPortalDomain)
+            : portalDomain.Trim();
         _certsDir = certsDir ?? EhConstants.CertsDir;
         _caPfxPath = Path.Combine(_certsDir, "ca.pfx");
         _caCrtPath = Path.Combine(_certsDir, "ca.crt");
         _tlsPfxPath = Path.Combine(_certsDir, "tls.pfx");
         _clientsDir = Path.Combine(_certsDir, "clients");
         _sanManifestPath = Path.Combine(_certsDir, "san-manifest.json");
+        _acmeStatePath = Path.Combine(_certsDir, "acme-state.json");
+        _acmeChainPath = Path.Combine(_certsDir, "acme-fullchain.pem");
 
         Directory.CreateDirectory(_certsDir);
         Directory.CreateDirectory(_clientsDir);
@@ -133,6 +143,38 @@ public sealed class CertificateManager
     public X509Certificate2? ServerCertificate => Volatile.Read(ref _serverCertificate);
 
     public string CaCertificatePem => _caCertificate.ExportCertificatePem();
+
+    /// <summary>
+    /// Updates the domain used for the certificate CN and default SANs. Does not re-issue the
+    /// certificate by itself; call <see cref="RegenerateServerCertificate"/> to apply it.
+    /// </summary>
+    public void SetPortalDomain(string domain)
+    {
+        if (!string.IsNullOrWhiteSpace(domain)) _portalDomain = domain.Trim().Trim('.').ToLowerInvariant();
+    }
+
+    /// <summary>Describes the leaf certificate Kestrel currently presents (subject, SANs, expiry).</summary>
+    public ServerCertificateInfo GetServerCertificateInfo()
+    {
+        var cert = ServerCertificate;
+        var dns = new List<string>();
+        var ips = new List<string>();
+        if (cert is not null)
+        {
+            foreach (var ext in cert.Extensions)
+            {
+                if (ext is not X509SubjectAlternativeNameExtension san) continue;
+                dns.AddRange(san.EnumerateDnsNames());
+                ips.AddRange(san.EnumerateIPAddresses().Select(address => address.ToString()));
+            }
+        }
+        return new ServerCertificateInfo(
+            cert?.Subject ?? string.Empty,
+            cert?.Thumbprint ?? string.Empty,
+            cert?.NotAfter ?? DateTimeOffset.MinValue,
+            dns,
+            ips);
+    }
 
     // ──────────────────────────────────────────────────────────────────────
     // Root CA
@@ -182,8 +224,8 @@ public sealed class CertificateManager
     // Server certificate
     // ──────────────────────────────────────────────────────────────────────
 
-    public static (List<string> Dns, List<string> Ips) DefaultSans() => (
-        new List<string> { "localhost", "*." + EhConstants.DefaultPortalDomain, EhConstants.DefaultPortalDomain },
+    public (List<string> Dns, List<string> Ips) DefaultSans() => (
+        new List<string> { "localhost", "*." + _portalDomain, _portalDomain },
         new List<string> { "127.0.0.1", "::1" });
 
     private (List<string> Dns, List<string> Ips) ReadSanManifest()
@@ -248,7 +290,7 @@ public sealed class CertificateManager
         {
             var ca = _caCertificate;
             using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-            var req = new CertificateRequest("CN=" + EhConstants.DefaultPortalDomain,
+            var req = new CertificateRequest("CN=" + _portalDomain,
                 key, HashAlgorithmName.SHA256);
 
             req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
@@ -302,6 +344,73 @@ public sealed class CertificateManager
         _log.LogInformation("Hot-swapped server certificate (previous thumbprint {Old}, new {New}).",
             previous?.Thumbprint, fresh.Thumbprint);
         return fresh;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // ACME / Let's Encrypt certificates
+    // ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// True when the active leaf was issued by ACME, so the startup routine must not replace it
+    /// with an internally signed certificate.
+    /// </summary>
+    public bool IsAcmeActive
+    {
+        get
+        {
+            try
+            {
+                if (!File.Exists(_acmeStatePath)) return false;
+                using var doc = JsonDocument.Parse(File.ReadAllText(_acmeStatePath));
+                return doc.RootElement.TryGetProperty("active", out var active) && active.GetBoolean();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Installs an externally issued (ACME) leaf with its chain, persists it as the active leaf and
+    /// hot-swaps it into Kestrel. The SAN manifest is updated so a restart keeps the external
+    /// certificate instead of regenerating an internal one.
+    /// </summary>
+    public X509Certificate2 InstallExternalServerCertificate(X509Certificate2 certificate,
+        IEnumerable<string> dnsNames, string? chainPem = null)
+    {
+        lock (_mutex)
+        {
+            var dns = dnsNames.Select(d => d.Trim())
+                .Where(d => d.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var pfx = certificate.Export(X509ContentType.Pfx, TlsCertPassword);
+            File.WriteAllBytes(_tlsPfxPath, pfx);
+            CryptoVault.TryRestrict(_tlsPfxPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+            File.WriteAllText(_sanManifestPath, JsonSerializer.Serialize(
+                new SanManifest { Dns = dns, Ips = new List<string>() }, JsonOpts));
+
+            if (!string.IsNullOrWhiteSpace(chainPem))
+            {
+                File.WriteAllText(_acmeChainPath, chainPem);
+                CryptoVault.TryRestrict(_acmeChainPath, UnixFileMode.UserRead | UnixFileMode.UserWrite
+                    | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+            }
+
+            File.WriteAllText(_acmeStatePath, JsonSerializer.Serialize(new
+            {
+                active = true,
+                domains = dns,
+                notAfter = certificate.NotAfter,
+                installedAt = DateTimeOffset.UtcNow
+            }, JsonOpts));
+
+            var stable = X509CertificateLoader.LoadPkcs12(pfx, TlsCertPassword, X509KeyStorageFlags.Exportable);
+            var previous = Interlocked.Exchange(ref _serverCertificate, stable);
+            _log.LogInformation("Installed external (ACME) certificate {Subject}, expiring {Expiry:u}; hot-swapped {Old}.",
+                stable.Subject, stable.NotAfter, previous?.Thumbprint);
+            return stable;
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -391,3 +500,11 @@ public sealed class CertificateManager
         public List<string> Ips { get; set; } = new();
     }
 }
+
+/// <summary>Immutable snapshot of the active leaf certificate used by the settings UI.</summary>
+public sealed record ServerCertificateInfo(
+    string Subject,
+    string Thumbprint,
+    DateTimeOffset NotAfter,
+    IReadOnlyList<string> DnsNames,
+    IReadOnlyList<string> IpAddresses);

@@ -394,6 +394,9 @@ var networkTracker = services.GetRequiredService<NetworkMetricsTracker>();
 var exporter = new ContainerToComposeExporter();
 var bootId = Guid.NewGuid().ToString("n")[..12];
 var appVersion = ComputeAppVersion(app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot"));
+// Date-based, build-stamped version (yyyy.M.d.buildNumber) exposed to the UI; `appVersion` above
+// remains the asset-freshness token the client watches for a redeploy.
+var buildVersion = BuildVersion();
 
 async Task<DockerSocketClient> ClientForAsync(HttpContext ctx, CancellationToken ct)
 {
@@ -873,6 +876,7 @@ system.MapGet("/health", () => Results.Json(new
 {
     status = "ok",
     time = DateTimeOffset.UtcNow,
+    version = buildVersion,
     appVersion,
     bootId
 })).AllowAnonymous();
@@ -883,7 +887,7 @@ system.MapGet("/info", async (HttpContext ctx, CancellationToken ct) =>
     var clusters = await store.GetKubeClustersAsync(ct);
     return Results.Json(new
     {
-        version = "1.0.0",
+        version = buildVersion,
         appVersion,
         bootId,
         portalDomain = portalConfigurator.PortalDomain,
@@ -1668,6 +1672,16 @@ hosts.MapPost("/", async (HttpContext ctx) =>
         Enabled = body.Enabled, WakeOnLanMac = body.WakeOnLanMac, WakeOnLanBroadcast = body.WakeOnLanBroadcast,
         ClientCertPem = body.ClientCertPem, ClientKeyPem = body.ClientKeyPem, CaCertPem = body.CaCertPem
     };
+    if (host.Kind != DockerHostKind.UnixSocket)
+        host.Endpoint = DockerSocketClient.NormalizeEndpoint(host.Endpoint);
+    // The UI never receives the certificate PEMs (they are [JsonIgnore]), so a blank field on
+    // edit means "keep what is stored" rather than "clear it".
+    if (host.Id != 0 && await store.GetDockerHostByIdAsync(host.Id, ctx.RequestAborted) is { } previous)
+    {
+        if (string.IsNullOrEmpty(host.ClientCertPem)) host.ClientCertPem = previous.ClientCertPem;
+        if (string.IsNullOrEmpty(host.ClientKeyPem)) host.ClientKeyPem = previous.ClientKeyPem;
+        if (string.IsNullOrEmpty(host.CaCertPem)) host.CaCertPem = previous.CaCertPem;
+    }
     await store.UpsertDockerHostAsync(host, ctx.RequestAborted);
     dockerFactory.Invalidate(host.Id);
     return Results.Json(new { host.Id });
@@ -1695,17 +1709,24 @@ hosts.MapPost("/agent/enroll", async (HttpContext ctx) =>
 {
     var body = await ctx.Request.ReadFromJsonAsync<EnrollRequest>(cancellationToken: ctx.RequestAborted);
     if (string.IsNullOrWhiteSpace(body?.Name)) return Results.BadRequest(new { error = "name required" });
-    var (cert, certPem, keyPem) = certificateManager.IssueClientCertificate(body.Name);
     var port = body.Port ?? 2376;
-    var composeSnippet = EhAgent.BuildAgentCompose(body.Name, certPem, keyPem, certificateManager.CaCertificatePem, port);
+    var (cert, certPem, keyPem) = certificateManager.IssueClientCertificate(body.Name);
+    // The agent presents a CA-issued server certificate; DockManager already trusts that CA,
+    // so the mTLS handshake validates in both directions without any host-level trust setup.
+    var (_, serverCertPem, serverKeyPem) = certificateManager.IssueAgentServerCertificate(
+        body.Name, dnsNames: string.IsNullOrWhiteSpace(body.Host) ? null : new[] { body.Host.Trim() });
+    var composeSnippet = EhAgent.BuildAgentCompose(body.Name, serverCertPem, serverKeyPem,
+        certificateManager.CaCertificatePem, port);
     return Results.Json(new
     {
         commonName = body.Name,
         thumbprint = cert.Thumbprint,
         clientCertificatePem = certPem,
         clientKeyPem = keyPem,
+        serverCertificatePem = serverCertPem,
+        serverKeyPem = serverKeyPem,
         caCertificatePem = certificateManager.CaCertificatePem,
-        endpoint = $"tcp://{body.Host ?? "agent-host"}:{port}",
+        endpoint = $"https://{body.Host ?? "agent-host"}:{port}",
         compose = composeSnippet
     });
 });
@@ -2000,6 +2021,17 @@ async Task EnsureLocalDockerHostAsync()
 }
 
 static string[] ShellSplit(string command) => ComposeStackService.ShellSplit(command).ToArray();
+
+/// <summary>The build-stamped, date-based version (yyyy.M.d.buildNumber) baked into the assembly
+/// by the <c>ResolveBuildVersion</c> MSBuild target.</summary>
+static string BuildVersion()
+{
+    var version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version;
+    if (version is null) return "1.0.0";
+    var build = version.Build < 0 ? 0 : version.Build;
+    var revision = version.Revision < 0 ? 0 : version.Revision;
+    return $"{version.Major}.{version.Minor}.{build}.{revision}";
+}
 
 /// <summary>A version token derived from the built UI entry document, so a redeploy that ships new
 /// static resources is detectable by an open client (which reloads and refreshes the worker).</summary>
@@ -2953,8 +2985,31 @@ internal static class EhAgent
         using var loggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(o => o.SingleLine = true));
         var log = loggerFactory.CreateLogger("agent");
 
-        // Self-signed server certificate for the mTLS endpoint; clients authenticate with a client cert.
-        var serverCert = CreateSelfSigned();
+        var certPath = GetStringArg(args, "--tls-cert", "/certs/server.crt");
+        var keyPath = GetStringArg(args, "--tls-key", "/certs/server.key");
+        var caPath = GetStringArg(args, "--tls-ca", "/certs/ca.crt");
+
+        // Preferred: the CA-issued server certificate and the internal CA shipped by the
+        // enrollment flow (compose mounts them at /certs). Then DockManager trusts this
+        // endpoint through the internal root CA, and we validate its client certificate
+        // against that same CA. Fallback: a self-signed certificate with no client-cert trust.
+        System.Security.Cryptography.X509Certificates.X509Certificate2 serverCert;
+        System.Security.Cryptography.X509Certificates.X509Certificate2? clientCa = null;
+        if (File.Exists(certPath) && File.Exists(keyPath))
+        {
+            var pem = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certPath, keyPath);
+            serverCert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(
+                pem.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pfx), null);
+            if (File.Exists(caPath))
+                clientCa = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadCertificateFromFile(caPath);
+            log.LogInformation("Agent loaded server certificate {Cert} (client CA: {Ca}).",
+                certPath, clientCa is null ? "system trust" : caPath);
+        }
+        else
+        {
+            serverCert = CreateSelfSigned();
+            log.LogWarning("No server certificate at {Cert}; using a self-signed certificate.", certPath);
+        }
 
         var builder = WebApplication.CreateBuilder([]);
         builder.WebHost.ConfigureKestrel(k =>
@@ -2968,6 +3023,19 @@ internal static class EhAgent
                 https.ClientCertificateValidation = (cert, chain, errors) =>
                 {
                     if (errors == SslPolicyErrors.None) return true;
+                    if (clientCa is not null
+                        && cert is System.Security.Cryptography.X509Certificates.X509Certificate2 presented)
+                    {
+                        using var built = new System.Security.Cryptography.X509Certificates.X509Chain();
+                        built.ChainPolicy.TrustMode =
+                            System.Security.Cryptography.X509Certificates.X509ChainTrustMode.CustomRootTrust;
+                        built.ChainPolicy.CustomTrustStore.Add(clientCa);
+                        built.ChainPolicy.RevocationMode =
+                            System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck;
+                        built.ChainPolicy.VerificationFlags =
+                            System.Security.Cryptography.X509Certificates.X509VerificationFlags.NoFlag;
+                        if (built.Build(presented)) return true;
+                    }
                     log.LogWarning("Rejected agent client certificate: {Errors}", errors);
                     return false;
                 };
@@ -3012,7 +3080,7 @@ internal static class EhAgent
         await app.RunAsync();
     }
 
-    public static string BuildAgentCompose(string name, string certPem, string keyPem, string caPem, int port)
+    public static string BuildAgentCompose(string name, string serverCertPem, string serverKeyPem, string caPem, int port)
     {
         var indent = (string s) => string.Join('\n', s.Split('\n').Select(l => "      " + l));
         return "# File: agent-compose.yml\n" +
@@ -3021,7 +3089,9 @@ internal static class EhAgent
                "    image: eh-dockmanager:latest\n" +
                $"    container_name: {name}\n" +
                "    restart: unless-stopped\n" +
-               "    command: [\"/app/eh-dockmanager\", \"--agent\", \"--port\", \"" + port + "\"]\n" +
+               "    command: [\"/app/eh-dockmanager\", \"--agent\", \"--port\", \"" + port + "\",\n" +
+               "              \"--tls-cert\", \"/certs/server.crt\", \"--tls-key\", \"/certs/server.key\",\n" +
+               "              \"--tls-ca\", \"/certs/ca.crt\"]\n" +
                "    ports:\n" +
                $"      - \"{port}:{port}\"\n" +
                "    volumes:\n" +
@@ -3032,10 +3102,10 @@ internal static class EhAgent
                "    read_only: true\n" +
                "    security_opt: [no-new-privileges:true]\n" +
                "    cap_drop: [ALL]\n" +
-               "# Save the client certificate, key and CA into ./agent-certs on the remote host:\n" +
-               "#   client.crt:\n" + indent(certPem) + "\n" +
-               "#   client.key:\n" + indent(keyPem) + "\n" +
-               "#   ca.crt:\n" + indent(caPem) + "\n";
+               "# Save these three files into ./agent-certs on the remote host (the agent reads /certs):\n" +
+               "#   server.crt (server certificate, signed by the DockManager internal CA):\n" + indent(serverCertPem) + "\n" +
+               "#   server.key (its private key):\n" + indent(serverKeyPem) + "\n" +
+               "#   ca.crt (internal CA, to validate DockManager's client certificate):\n" + indent(caPem) + "\n";
     }
 
     private static X509Certificate2 CreateSelfSigned()

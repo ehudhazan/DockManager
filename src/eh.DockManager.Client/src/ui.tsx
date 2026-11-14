@@ -13,7 +13,7 @@ import {
   type YamlIssue
 } from './yaml';
 
-export type Notify = (message: string, tone?: 'info' | 'success' | 'error') => void;
+export type Notify = (message: string, tone?: 'info' | 'success' | 'error', durationMs?: number) => void;
 export type OpenTerminal = (title: string, url: string) => void;
 
 export function classNames(...parts: (string | false | null | undefined)[]): string {

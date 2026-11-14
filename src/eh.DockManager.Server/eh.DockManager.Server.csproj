@@ -34,6 +34,31 @@
     <WarningsNotAsErrors>IL2026;IL2104;IL3050</WarningsNotAsErrors>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- Date-based version: yyyy.M.d.<buildNumber>. BuildNumber is supplied by -p:BuildNumber
+         (the Docker build arg), else read from the git commit count (local builds), else a
+         date/time fallback so any redeploy still changes the version. -->
+    <BuildNumber Condition="'$(BuildNumber)' == ''"></BuildNumber>
+    <_BuildDate>$([System.DateTime]::UtcNow.ToString('yyyy.M.d'))</_BuildDate>
+    <_FallbackBuildNumber>$([System.DateTime]::UtcNow.ToString('HHmm'))</_FallbackBuildNumber>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <Target Name="ResolveBuildVersion"
+          BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo;CoreGenerateAssemblyInfo;CoreCompile">
+    <Exec Command="git rev-list --count HEAD 2>/dev/null" ConsoleToMSBuild="true" IgnoreExitCode="true"
+          StandardOutputImportance="low"
+          Condition="'$(BuildNumber)' == '' and Exists('$(MSBuildProjectDirectory)/../../.git')">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommitCount" />
+    </Exec>
+    <PropertyGroup>
+      <BuildNumber Condition="'$(_GitCommitCount)' != ''">$([System.String]::Copy('$(_GitCommitCount)').Trim())</BuildNumber>
+      <BuildNumber Condition="'$(BuildNumber)' == ''">$(_FallbackBuildNumber)</BuildNumber>
+      <Version>$(_BuildDate).$(BuildNumber)</Version>
+      <InformationalVersion>$(Version)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
   <ItemGroup>
     <!-- Strictly Audited Tier-1 NuGet Allowlist -->
     <PackageReference Include="Yarp.ReverseProxy" Version="2.3.0" />

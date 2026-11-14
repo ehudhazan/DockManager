@@ -4,7 +4,7 @@ title: Stack constraints
 description: Binding dependency, build, container, port, and storage constraints for eh.DockManager, including the audited NuGet allowlist and banned packages.
 tags: [constraints, dependencies, build, security]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:23:24Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T09:12:01Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -107,6 +107,19 @@ package (TOTP must be a pure RFC 6238 implementation).[^prompt-md]
   `// TODO`, no `// rest of implementation` truncation.
 * Prefix every generated code block with `// File: relative/path/to/file`.
 * `PROMPT.md` §9 fixes the file generation order and the intended module boundaries.[^prompt-md]
+
+# Version & build number
+
+The app version is date-based: `yyyy.M.d.<buildNumber>` (e.g. `2026.11.14.8`), baked into the assembly by the
+`ResolveBuildVersion` MSBuild target in `eh.DockManager.Server.csproj` and surfaced by `GET /api/system/health`
+and `/api/system/info`; see
+[Client/server version negotiation & asset freshness](/project/client-server-versioning.md).
+
+`<buildNumber>` resolves from, in order: the `BuildNumber` MSBuild property (`-p:BuildNumber`, fed by the
+`BUILD_NUMBER` Docker build arg), the git commit count when a repository checkout is present, then a
+build-time `HHmm` fallback. `docker-compose.yml` passes `BUILD_NUMBER: ${BUILD_NUMBER:-}`, and the root
+`build.sh` exports it as `git rev-list --count HEAD`, so `./build.sh` stamps the commit count while a plain
+`docker compose build` uses the fallback. Docker's build context excludes `.git` (`.dockerignore`).
 
 # Ports, storage, and secrets
 

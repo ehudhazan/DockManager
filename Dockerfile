@@ -26,6 +26,9 @@ RUN npm run build
 
 # ── Stage 2: .NET 11 trimmed + ReadyToRun composite single-file binary ────────────────────────────
 FROM ${SDK_IMAGE} AS server-build
+# Date-based version yyyy.M.d.<BUILD_NUMBER>; the host passes `git rev-list --count HEAD`
+# (see build.sh / docker-compose.yml). Empty falls back to a build-time clock value.
+ARG BUILD_NUMBER=
 WORKDIR /src
 COPY global.json ./
 COPY src/eh.DockManager.Server/eh.DockManager.Server.csproj ./eh.DockManager.Server/
@@ -33,7 +36,7 @@ RUN dotnet restore eh.DockManager.Server/eh.DockManager.Server.csproj -r linux-x
 COPY src/eh.DockManager.Server/ ./eh.DockManager.Server/
 COPY --from=ui-build /eh.DockManager.Server/wwwroot ./eh.DockManager.Server/wwwroot/
 WORKDIR /src/eh.DockManager.Server
-RUN dotnet publish -c Release -r linux-x64 --no-restore -o /app/publish
+RUN dotnet publish -c Release -r linux-x64 --no-restore -p:BuildNumber="$BUILD_NUMBER" -o /app/publish
 
 # ── Stage 3: Distroless, non-root, read-only runtime (no shell, no package manager) ───────────────
 FROM ${RUNTIME_IMAGE} AS final

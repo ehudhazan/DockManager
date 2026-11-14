@@ -222,6 +222,7 @@ export interface SystemInfo {
 export interface HealthInfo {
   status: string;
   time: string;
+  version: string;
   appVersion: string;
   bootId: string;
 }

@@ -474,6 +474,57 @@ public sealed class CertificateManager
         }
     }
 
+    /// <summary>
+    /// Issues a server certificate for the single-binary agent (<c>--agent</c>), signed by the
+    /// internal root CA, so DockManager's Docker client can validate the agent's TLS endpoint
+    /// through the same CA chain it already trusts. The remote host name/IP are added as SANs.
+    /// </summary>
+    public (X509Certificate2 Certificate, string CertPem, string KeyPem) IssueAgentServerCertificate(
+        string commonName, IEnumerable<string>? dnsNames = null, IEnumerable<string>? ipAddresses = null,
+        int validDays = 825)
+    {
+        commonName = Sanitize(commonName);
+        lock (_mutex)
+        {
+            var ca = _caCertificate;
+            using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var req = new CertificateRequest($"CN={commonName}, OU=Docker Agent, O=eh.DockManager",
+                key, HashAlgorithmName.SHA256);
+            req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+            req.CertificateExtensions.Add(new X509KeyUsageExtension(
+                X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+            req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(new OidCollection
+            {
+                new Oid("1.3.6.1.5.5.7.3.1") // serverAuth
+            }, false));
+            req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
+
+            var dns = (dnsNames ?? Enumerable.Empty<string>())
+                .Where(d => !string.IsNullOrWhiteSpace(d)).Select(d => d.Trim())
+                .Append("localhost").Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var san = new SubjectAlternativeNameBuilder();
+            foreach (var name in dns) san.AddDnsName(name);
+            foreach (var ip in (ipAddresses ?? Enumerable.Empty<string>())
+                         .Where(i => !string.IsNullOrWhiteSpace(i)).Select(i => i.Trim()).Distinct())
+                if (IPAddress.TryParse(ip, out var parsed)) san.AddIpAddress(parsed);
+            san.AddIpAddress(IPAddress.Loopback);
+            req.CertificateExtensions.Add(san.Build());
+
+            var notBefore = DateTimeOffset.UtcNow.AddDays(-1);
+            var notAfter = notBefore.AddDays(validDays);
+            using var issued = req.Create(ca, notBefore, notAfter, RandomNumberGenerator.GetBytes(16));
+            using var withKey = issued.CopyWithPrivateKey(key);
+            var certPem = issued.ExportCertificatePem();
+            var keyPem = key.ExportECPrivateKeyPem();
+            var pfx = withKey.Export(X509ContentType.Pfx, CaCertPassword);
+            _log.LogInformation(
+                "Issued agent server certificate CN={CommonName} (SANs: {Sans}; expires {Expiry:u}).",
+                commonName, string.Join(", ", dns), notAfter);
+            return (X509CertificateLoader.LoadPkcs12(pfx, CaCertPassword, X509KeyStorageFlags.Exportable),
+                certPem, keyPem);
+        }
+    }
+
     /// <summary>Validates a presented client certificate against the internal root CA chain.</summary>
     public bool ValidateClientCertificate(X509Certificate2? client)
     {

@@ -4,7 +4,7 @@ title: eh.DockManager
 description: Home-server and enterprise container/cluster control plane, port 443 reverse proxy and app portal, auto-updater, and MCP server built on .NET 11 and React 19.
 tags: [project, dockmanager, architecture]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T19:45:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T09:12:01Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -54,6 +54,7 @@ build rules.[^prompt-md]
 | `src/eh.DockManager.Server/` | ASP.NET Core server, implemented: `Program.cs` (hosts everything), `Models/DomainModels.cs`, `Data/SqliteWalStore.cs`, `Security/{CryptoAndCertManager,AuthAndSsoEngine,QrCodeGenerator,AcmeClient}.cs`, `Docker/{DockerSocketClient,DockerStreamDemuxer,NetworkMetricsTracker}.cs`, `Stacks/ComposeAndConverters.cs`, `Kubernetes/KubeClusterService.cs`, `Portal/YarpPortalProxy.cs`, `McpAndWebhooks/McpAndWebhookEngine.cs` |
 | `src/eh.DockManager.Client/` | Vite + React 19 + Tailwind client, implemented: `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `tsconfig.json`, and `src/{main.tsx,App.tsx,ui.tsx,icons.tsx,api.ts,types.ts,index.css}` (see [UI & UX conventions](/project/ui-ux.md)) |
 | `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Multi-stage build and deployment; `.env.example` is the host-local template (the real `.env` is gitignored) |
+| `build.sh` | Build helper: exports `BUILD_NUMBER` = `git rev-list --count HEAD` and runs `docker compose build`, stamping the date-based version |
 | `AGENTS.md` | Binding knowledge-workflow rules for every agent |
 | `okf/` | This knowledge bundle |
 | `.opencode/skills/okf/` | The `okf` skill that defines the knowledge workflow |
@@ -69,6 +70,7 @@ runtime behaviours exercised, and the deviations discovered during the build).
 * Change history for this bundle: [Update log](/log.md).
 * Binding dependency and build rules: [Stack constraints](/project/stack-constraints.md).
 * Host-side compose prerequisites: [Host preparation](/project/deployment.md).
+* Connecting a remote Docker engine: [Remote Docker hosts](/project/remote-docker-hosts.md).
 * Working-environment guardrails (PII/secret redaction in tool output):
   [Agent environment guardrails](/environment/guardrails.md).
 * Browser automation against a laptop Chrome from this host:

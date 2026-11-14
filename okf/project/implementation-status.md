@@ -4,7 +4,7 @@ title: Delivered implementation
 description: What was actually built and verified for eh.DockManager, the generated file set, runtime behaviours exercised, and the deviations from PROMPT.md discovered during the build.
 tags: [status, implementation, build, deviations]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T23:58:02Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T11:04:22Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -262,7 +262,7 @@ A follow-up pass reworked the client and closed several runtime gaps; see
 * **Richer charts** — the stats SSE (`GET /api/containers/{id}/stats`) now emits the full
   `ParseExtendedMetric` sample (cores, memory peak, PIDs, block read/written, network bytes/packets); the
   Portal card's **More info** shows live network and disk sparklines plus process/thread, core, memory-peak
-  and block-[ADDRESS] counters, the container inspector adds a **Disk throughput** chart, and the Dashboard's
+  and block-dotnet counters, the container inspector adds a **Disk throughput** chart, and the Dashboard's
   Network traffic panel adds host load/process counters and a **Host load & processes** disclosure
   (`HostSystemCounters` from `/proc/loadavg`, `/proc/stat`, `/proc/meminfo`). New `MiniMetric`/`counterRate`
   atoms; see [UI & UX conventions](/project/ui-ux.md) and
@@ -309,6 +309,98 @@ sheet, the command palette, the user menu, the terminal drawer and the sign-in s
 `npm run typecheck`, `npm run build`, `dotnet build` (0 errors) and `docker compose build` pass, and
 the deployed bundle's asset hash matches the local build (`index-DYHSMK9s.js`). No `verified` entry
 was added — a self-run audit is not independent verification.
+
+# Ninth pass — remote Docker host transport fixes
+
+Driven by the operator's report that adding a remote Docker host fails when the certificates are
+not valid and there is no CA to trust. The mTLS agent path could not complete a handshake; see
+[Remote Docker hosts](/project/remote-docker-hosts.md) for the model and the runbook.
+
+* **The enrollment endpoint was unusable.** `POST /api/hosts/agent/enroll` returned
+  `tcp://host:2376`; `HttpClient` accepts a `tcp://` `BaseAddress` but every send throws
+  `NotSupportedException: The 'tcp' scheme is not supported.` `DockerSocketClient.NormalizeEndpoint`
+  now maps `tcp://` (and a bare `host:port`) to `https://`, applied on save (`POST /api/hosts`, MCP
+  `save_host`) and again in the client constructor, so legacy rows are repaired on connect.
+* **The agent presented a certificate DockManager could not validate.** It served a per-start
+  self-signed certificate. Enrollment now also issues a **server** certificate signed by the internal
+  root CA (SANs = the remote host address + `localhost`) with `CertificateManager.IssueAgentServerCertificate`,
+  and the generated compose mounts it as `/certs/server.crt` with `--tls-cert`/`--tls-key`; DockManager
+  trusts it through the existing internal-CA chain (validation rule 2).
+* **The agent never loaded the CA**, so it rejected the enrolled client certificate (its compose
+  mounted `./agent-certs` but the code read only `--port`/`--socket`). `EhAgent` now loads
+  `/certs/ca.crt` and validates client certificates against it with a custom-root-trust chain;
+  without the files it still falls back to a self-signed certificate.
+* **Editing a host wiped its certificates.** The UI cannot receive the PEMs (`[JsonIgnore]`), so
+  `POST /api/hosts` now keeps the stored `ClientCertPem`/`ClientKeyPem`/`CaCertPem` when the incoming
+  value is empty. The UI states this and the host form/runbook now describe the `https://` endpoint
+  and the `./agent-certs` files.
+* **`X509Certificate2.CreateFromPemFile(path)` (cert-only) throws in .NET 11**; the agent uses
+  `X509CertificateLoader.LoadCertificateFromFile` instead.
+
+Verified end-to-end against a local instance (temp `EHDM_DATA_DIR`, ports 18443/12376): enrollment
+returns `https://127.0.0.1:12376`; `curl` with the enrolled client certificate against the running
+agent returns `OK` (HTTP 200) and without a certificate the handshake fails; `POST /api/hosts` with a
+`tcp://` endpoint stores `https://…` and `POST /api/hosts/{id}/test` returns `{"online":true}`; a
+second save with blank certificate fields keeps the stored certs (lengths 724/226/785) and the host
+stays online. `dotnet build` (0 errors), `npm run typecheck`, `npm run build` and `docker compose build`
+pass. No `verified` entry was added — self-run checks are not independent verification.
+
+# Tenth pass — date-based version with a git build number
+
+The displayed version changed from `1.0.0+<index.html hash>` to a date-based `yyyy.M.d.<buildNumber>`
+(e.g. `2026.11.14.8`), per the operator's request, and the client now shows it.
+
+* `eh.DockManager.Server.csproj` gained a `ResolveBuildVersion` MSBuild target that sets the assembly
+  `Version`/`InformationalVersion` to `yyyy.M.d.<buildNumber>`; `Program.cs` reads it back from the assembly
+  version and exposes it as `version` on `GET /api/system/health` and `/api/system/info` (the hardcoded
+  `1.0.0` in `/info` is gone). The asset hash stays as `appVersion` — the token the client watches for a
+  redeploy.
+* The build number is the git commit count, read by MSBuild when a checkout is present; otherwise the
+  `BUILD_NUMBER` Docker build arg (`docker-compose.yml` passes `${BUILD_NUMBER:-}`, the `Dockerfile` forwards
+  it as `-p:BuildNumber`), otherwise an `HHmm` clock fallback. The MSBuild git step is guarded on a `.git`
+  checkout, which Docker's context excludes.
+* New root `build.sh` (a supporting addition to the PROMPT.md §9 file list, like `QrCodeGenerator.cs` and
+  `AcmeClient.cs`) exports `BUILD_NUMBER=git rev-list --count HEAD` and runs `docker compose build`, so
+  `./build.sh` stamps the commit count while a plain `docker compose build` uses the fallback.
+* Client: `HealthInfo.version` added; the sidebar footer and Settings → System information show the date
+  version (plus a `Build token` row for `appVersion` and the `bootId`); the reload watcher still keys on
+  `appVersion`.
+
+Verified: `dotnet build` stamps `2026.11.14.8` (commit count 8) and `-p:BuildNumber=999` stamps
+`2026.11.14.999`; `./build.sh` builds the image and the running container's `/api/system/health` returns
+`{"version":"2026.11.14.8","appVersion":"1.0.0+fa1547e93fa9",…}`. `npm run typecheck` and `npm run build`
+pass. No `verified` entry was added — self-run checks are not independent verification.
+
+# Eleventh pass — toast polish
+
+The PWA **Install app** toast was narrow, short-lived and static. Fixed in the client:
+
+* **Width.** `Toast` used `left-1/2` with no `right`/width, so a `position: fixed` element's
+  shrink-to-fit width was capped at ~50vw — very narrow on a phone. Phones now use `left-3 right-3`
+  (full width between margins); `md`+ keeps the centred, content-sized (max 28rem) layout.
+* **Lifetime.** The on-screen time moved into `Toast` and is overridable per
+  `notify(message, tone, durationMs)`; the install instructions pass `0` for a **sticky** toast that
+  stays until dismissed (defaults: 3.6 s, 5.2 s for errors). A new monotonic `id` remounts the toast
+  so the entrance animation replays every time.
+* **Animation.** `tailwind.config.js` gained `toastIn`/`toastOut` keyframes (opacity plus the
+  independent `translate`/`scale` properties, so the centring `-translate-x-1/2` survives) and
+  animations; `Toast` animates in, and on dismiss or timeout switches to the exit animation and
+  unmounts when it ends (220 ms), with a `motion-reduce` opt-out.
+
+Verified in the build: `npm run typecheck` and `npm run build` pass, and the emitted CSS contains
+`@keyframes toastIn`/`toastOut`. No `verified` entry was added — self-run checks are not independent
+verification.
+
+# Twelfth pass — mobile version visibility
+
+The date-based version was only visible in the desktop sidebar footer (which is `hidden md:flex`) and in
+Settings → System information, which is admin-only — so a phone (or a Viewer) had nowhere to read it. The
+bottom **More** sheet now carries a footer line `eh.DockManager · v2026.11.14.8`, fed by the same
+`serverVersion` the health poll sets and shown for every role; `BottomNav`/`MoreSheet` take an `appVersion`
+prop from `App`.
+
+Verified in the build: `npm run typecheck` and `npm run build` pass. No `verified` entry was added —
+self-run checks are not independent verification.
 
 # Notes
 

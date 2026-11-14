@@ -82,6 +82,12 @@ public sealed class DockerSocketClient : IDisposable
         _log = log;
         _apiVersion = apiVersion;
 
+        // `HttpClient` accepts a `tcp://` BaseAddress but rejects every send with
+        // "The 'tcp' scheme is not supported", so normalise the Docker-style endpoint
+        // to a scheme HttpClient understands before constructing the handler.
+        if (host.Kind != DockerHostKind.UnixSocket)
+            host.Endpoint = NormalizeEndpoint(host.Endpoint);
+
         _handler = BuildHandler(host);
         var baseAddress = host.Kind == DockerHostKind.UnixSocket
             ? new Uri("http://docker")
@@ -92,6 +98,26 @@ public sealed class DockerSocketClient : IDisposable
             Timeout = Timeout.InfiniteTimeSpan
         };
         _http.DefaultRequestHeaders.Add("User-Agent", "eh.DockManager/1.0");
+    }
+
+    /// <summary>
+    /// Normalises a remote Docker endpoint into a scheme <see cref="HttpClient"/> can use.
+    /// The Docker CLI convention <c>tcp://host:2376</c> means TLS, so it maps to <c>https://</c>;
+    /// a bare <c>host:port</c> defaults to <c>https://</c>. Unix sockets and explicit
+    /// <c>http://</c>/<c>https://</c> endpoints are returned unchanged.
+    /// </summary>
+    public static string NormalizeEndpoint(string endpoint)
+    {
+        var value = (endpoint ?? string.Empty).Trim();
+        if (value.Length == 0) return value;
+        if (value.StartsWith("tcp://", StringComparison.OrdinalIgnoreCase))
+            return "https://" + value["tcp://".Length..];
+        if (value.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("unix://", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("npipe://", StringComparison.OrdinalIgnoreCase))
+            return value;
+        return value.Contains("://") ? value : "https://" + value;
     }
 
     private SocketsHttpHandler BuildHandler(DockerHost host)

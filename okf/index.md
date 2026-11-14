@@ -24,6 +24,7 @@ at `.opencode/skills/okf/`.
 * [Client/server version negotiation & asset freshness](project/client-server-versioning.md) - How the client detects a disconnected server, notices a redeploy through the health endpoint's appVersion/bootId, reloads the shell, refreshes the service worker, and why sw.js and index.html are never cached.
 * [Stack YAML editor](project/stack-yaml-editor.md) - How the Stacks view YAML editor validates a compose document, offers keyboard-driven key and value completions, and indents lists and mappings intelligently, and the schema validator endpoint behind it.
 * [Host preparation](project/deployment.md) - Host-side steps required before the compose stack starts: bind-mount ownership, the host docker group id, and the empty-password bootstrap fallback.
+* [Remote Docker hosts](project/remote-docker-hosts.md) - How DockManager connects to a remote Docker engine — the Unix-socket, mTLS-daemon and single-binary-agent host kinds, the endpoint scheme rules, the certificate validation chain on each side, and the plain-TCP fallback when no certificate is usable.
 
 ## Environment
 

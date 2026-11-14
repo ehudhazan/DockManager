@@ -13,7 +13,12 @@ name: eh-dockmanager
 
 services:
   eh-dockmanager:
-    build: .
+    build:
+      context: .
+      args:
+        # Build number for the date-based version; export BUILD_NUMBER, or use ./build.sh
+        # which sets it to the git commit count. Empty falls back to a build-time clock value.
+        BUILD_NUMBER: ${BUILD_NUMBER:-}
     image: eh-dockmanager:latest
     container_name: eh-dockmanager
     restart: unless-stopped

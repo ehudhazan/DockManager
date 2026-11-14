@@ -121,8 +121,12 @@ interface TerminalTab {
 }
 
 interface ToastState {
+  /** Monotonic id so a new toast remounts (and re-runs its entrance animation). */
+  id: number;
   text: string;
   tone: 'info' | 'success' | 'error';
+  /** Override the default on-screen time in ms; `0` keeps the toast until it is dismissed. */
+  durationMs?: number;
 }
 
 /** Chrome/Edge fire this when the PWA can be installed; not in the TS DOM lib. */
@@ -148,6 +152,7 @@ export default function App() {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [inspector, setInspector] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const toastId = useRef(0);
 
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
@@ -157,10 +162,12 @@ export default function App() {
   // service-worker refresh so the shell and the pre-built static resources never go stale.
   const [serverDown, setServerDown] = useState(false);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
+  const [appUpdate, setAppUpdate] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let baseVersion: string | null = null;
+    let reloadTimer: number | null = null;
     const check = async () => {
       try {
         const health = await api.health();
@@ -168,11 +175,17 @@ export default function App() {
         setServerDown(false);
         if (baseVersion === null) {
           baseVersion = health.appVersion;
-          setServerVersion(health.appVersion);
+          setServerVersion(health.version ?? health.appVersion);
         } else if (health.appVersion && health.appVersion !== baseVersion) {
+          // A redeploy changed the served assets: show a note, refresh the worker, and reload
+          // after a short grace period so the notice is actually readable.
           baseVersion = health.appVersion;
-          setServerVersion(health.appVersion);
-          void refreshServiceWorker().finally(() => window.location.reload());
+          setServerVersion(health.version ?? health.appVersion);
+          setAppUpdate(health.version ?? health.appVersion);
+          void refreshServiceWorker();
+          if (reloadTimer === null) {
+            reloadTimer = window.setTimeout(() => window.location.reload(), 5000);
+          }
         }
       } catch {
         if (!cancelled) setServerDown(true);
@@ -183,6 +196,7 @@ export default function App() {
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      if (reloadTimer !== null) window.clearTimeout(reloadTimer);
     };
   }, []);
 
@@ -193,10 +207,11 @@ export default function App() {
     document.querySelector('main')?.scrollTo({ top: 0 });
   }, [view]);
 
-  const notify = useCallback<Notify>((message, tone = 'info') => {
-    setToast({ text: message, tone });
-    window.setTimeout(() => setToast(null), tone === 'error' ? 5200 : 3600);
+  const notify = useCallback<Notify>((message, tone = 'info', durationMs) => {
+    toastId.current += 1;
+    setToast({ id: toastId.current, text: message, tone, durationMs });
   }, []);
+  const closeToast = useCallback(() => setToast(null), []);
 
   useEffect(() => {
     const onPrompt = (event: Event) => {
@@ -228,7 +243,8 @@ export default function App() {
       isIos
         ? 'On iPhone/iPad: tap Share → “Add to Home Screen”. The site must use a certificate the device trusts — install ca.crt from Settings → TLS certificate, or enable Let’s Encrypt.'
         : 'Install from the browser menu: Chrome/Edge → “Install app”, or the install icon in the address bar. If that option is missing, the site’s certificate is not trusted yet — install ca.crt from Settings → TLS certificate, or enable Let’s Encrypt.',
-      'info'
+      'info',
+      0
     );
   }, [installPrompt, notify]);
 
@@ -300,7 +316,7 @@ export default function App() {
 
   return (
     <div className="flex min-h-[100dvh] bg-ink-950 text-slate-100">
-      <Sidebar view={view} setView={setView} nav={visibleNav} session={session} />
+      <Sidebar view={view} setView={setView} nav={visibleNav} session={session} appVersion={serverVersion} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
@@ -318,6 +334,7 @@ export default function App() {
         />
 
         {serverDown && <ConnectionBanner version={serverVersion} />}
+        {appUpdate && !serverDown && <UpdateBanner version={appUpdate} />}
 
         {/* `overflow-x-hidden`: nothing in a view is meant to be wider than the viewport
             (tables and tab strips carry their own scroll containers), so clip horizontally
@@ -350,7 +367,7 @@ export default function App() {
         </main>
       </div>
 
-      <BottomNav view={view} setView={setView} nav={visibleNav} session={session} onInstall={installApp} />
+      <BottomNav view={view} setView={setView} nav={visibleNav} session={session} onInstall={installApp} appVersion={serverVersion} />
 
       {commandOpen && (
         <CommandPalette
@@ -386,7 +403,7 @@ export default function App() {
         onClose={(id) => setTerminals((tabs) => tabs.filter((t) => t.id !== id))}
       />
 
-      {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
+      {toast && <Toast key={toast.id} toast={toast} onClose={closeToast} />}
     </div>
   );
 }
@@ -402,6 +419,21 @@ function ConnectionBanner({ version }: { version: string | null }) {
       </span>
       <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => window.location.reload()}>
         Reload
+      </button>
+    </div>
+  );
+}
+
+/** Non-blocking banner shown when a redeploy changed the served app version. */
+function UpdateBanner({ version }: { version: string }) {
+  return (
+    <div className="flex items-center gap-2 border-b border-emerald-800/60 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200 sm:px-5">
+      <Icon name="refreshCw" className="h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1">
+        <strong>App upgraded to v{version}.</strong> Reloading automatically to load the new version…
+      </span>
+      <button type="button" className="btn-ghost px-2 py-1 text-xs" onClick={() => window.location.reload()}>
+        Reload now
       </button>
     </div>
   );
@@ -432,7 +464,28 @@ function Splash({ message }: { message: string }) {
   );
 }
 
+/**
+ * Transient notification. On a phone it spans the width (minus margins); on a wider screen it
+ * shrinks to its content and centres. It animates in, then out on dismiss or after `durationMs`
+ * (default 3.6 s, 5.2 s for errors; `0` is sticky — it stays until dismissed) — the lifetime is
+ * kept in step with the exit animation so the element is unmounted only once it has finished leaving.
+ */
 function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
+  const [leaving, setLeaving] = useState(false);
+  const duration = toast.durationMs ?? (toast.tone === 'error' ? 5200 : 3600);
+
+  useEffect(() => {
+    if (duration <= 0) return undefined; // sticky: never auto-dismiss
+    const timer = window.setTimeout(() => setLeaving(true), duration);
+    return () => window.clearTimeout(timer);
+  }, [duration]);
+
+  useEffect(() => {
+    if (!leaving) return undefined;
+    const timer = window.setTimeout(onClose, 220);
+    return () => window.clearTimeout(timer);
+  }, [leaving, onClose]);
+
   const tones: Record<ToastState['tone'], string> = {
     info: 'border-ink-700',
     success: 'border-emerald-800/70',
@@ -440,23 +493,33 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
   };
   const icons: Record<ToastState['tone'], IconName> = { info: 'info', success: 'circleCheck', error: 'circleAlert' };
   const tint = toast.tone === 'error' ? 'text-red-300' : toast.tone === 'success' ? 'text-emerald-300' : 'text-accent';
+
   return (
     <div
+      role="status"
       className={classNames(
-        'fixed bottom-24 left-1/2 z-[70] flex max-w-[92vw] -translate-x-1/2 items-center gap-2 rounded-xl border bg-ink-850 px-3 py-2 text-sm shadow-2xl md:bottom-6',
+        // Phone: full width between 0.75rem margins. md+: shrink to content, centred.
+        'fixed bottom-24 left-3 right-3 z-[70] flex items-start gap-2 rounded-xl border bg-ink-850 px-3.5 py-2.5 text-sm shadow-2xl',
+        'md:bottom-6 md:left-1/2 md:right-auto md:max-w-md md:-translate-x-1/2',
+        leaving ? 'animate-toastOut motion-reduce:animate-none' : 'animate-toastIn motion-reduce:animate-none',
         tones[toast.tone]
       )}
     >
-      <Icon name={icons[toast.tone]} className={classNames('h-4 w-4 shrink-0', tint)} />
-      <span className="min-w-0 break-words text-slate-200">{toast.text}</span>
-      <button type="button" className="ml-1 text-slate-400 hover:text-slate-200" onClick={onClose} aria-label="Dismiss">
+      <Icon name={icons[toast.tone]} className={classNames('mt-0.5 h-4 w-4 shrink-0', tint)} />
+      <span className="min-w-0 flex-1 break-words text-slate-200">{toast.text}</span>
+      <button
+        type="button"
+        className="mt-0.5 shrink-0 text-slate-400 hover:text-slate-200"
+        onClick={() => setLeaving(true)}
+        aria-label="Dismiss"
+      >
         <Icon name="x" className="h-4 w-4" />
       </button>
     </div>
   );
 }
 
-function Sidebar({ view, setView, nav, session }: { view: ViewKey; setView: (v: ViewKey) => void; nav: NavItem[]; session: SessionUser }) {
+function Sidebar({ view, setView, nav, session, appVersion }: { view: ViewKey; setView: (v: ViewKey) => void; nav: NavItem[]; session: SessionUser; appVersion?: string | null }) {
   return (
     <aside className="sticky top-0 hidden h-[100dvh] w-60 shrink-0 flex-col border-r border-ink-800 bg-ink-900/50 p-3 md:flex">
       <div className="mb-5 flex items-center gap-2.5 px-1">
@@ -505,6 +568,15 @@ function Sidebar({ view, setView, nav, session }: { view: ViewKey; setView: (v: 
           <RoleBadge role={session.role} />
         </div>
       </div>
+
+      {appVersion && (
+        <div
+          className="mt-2 truncate px-1 text-center font-mono text-[10px] text-slate-400"
+          title={`Application version (build): ${appVersion}`}
+        >
+          v{appVersion}
+        </div>
+      )}
     </aside>
   );
 }
@@ -646,13 +718,15 @@ function BottomNav({
   setView,
   nav,
   session,
-  onInstall
+  onInstall,
+  appVersion
 }: {
   view: ViewKey;
   setView: (v: ViewKey) => void;
   nav: NavItem[];
   session: SessionUser;
   onInstall: () => void;
+  appVersion?: string | null;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const primary = PRIMARY_MOBILE.map((key) => nav.find((item) => item.key === key)).filter(Boolean) as NavItem[];
@@ -687,6 +761,7 @@ function BottomNav({
           onClose={() => setMoreOpen(false)}
           onNavigate={(key) => { setView(key); setMoreOpen(false); }}
           onInstall={onInstall}
+          appVersion={appVersion}
         />
       )}
     </>
@@ -699,7 +774,8 @@ function MoreSheet({
   session,
   onClose,
   onNavigate,
-  onInstall
+  onInstall,
+  appVersion
 }: {
   nav: NavItem[];
   view: ViewKey;
@@ -707,6 +783,7 @@ function MoreSheet({
   onClose: () => void;
   onNavigate: (key: ViewKey) => void;
   onInstall: () => void;
+  appVersion?: string | null;
 }) {
   const standalone = typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches;
   return (
@@ -742,6 +819,12 @@ function MoreSheet({
             <Icon name="download" className="h-4 w-4" /> Install app (PWA)
           </button>
         )}
+        <div className="mt-3 flex items-center justify-between border-t border-ink-800 pt-3 text-[11px] text-slate-400">
+          <span className="font-semibold text-slate-300">eh.DockManager</span>
+          {appVersion && (
+            <span className="font-mono" title={`Application version (build): ${appVersion}`}>v{appVersion}</span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -3668,8 +3751,8 @@ function RegistryManager({ registries, reload, notify }: { registries: RegistryI
 // ────────────────────────────────────────────────────────────────────────────
 const HOST_KINDS = [
   { value: 'UnixSocket', label: 'Local Unix socket', hint: 'The host running DockManager (/var/run/docker.sock).' },
-  { value: 'HttpsMutualTls', label: 'Remote over mTLS', hint: 'A remote Docker API secured with client certificates.' },
-  { value: 'AgentMtls', label: 'DockManager agent', hint: 'A remote host running the single-binary agent in --agent mode.' }
+  { value: 'HttpsMutualTls', label: 'Remote over mTLS', hint: 'A remote Docker API over TLS, e.g. https://host:2376. Plain unauthenticated TCP is http://host:2375.' },
+  { value: 'AgentMtls', label: 'DockManager agent', hint: 'A remote host running the single-binary agent in --agent mode (https://host:2376).' }
 ];
 
 function HostsView({ notify, refreshHosts }: { notify: Notify; refreshHosts: () => void }) {
@@ -3688,7 +3771,7 @@ function HostsView({ notify, refreshHosts }: { notify: Notify; refreshHosts: () 
 
   useEffect(load, [load]);
 
-  const emptyHost: DockerHostInfo = { id: 0, name: '', kind: 'HttpsMutualTls', endpoint: 'tcp://192.168.1.50:2376', enabled: true, wakeOnLanMac: '', lastSeenAt: null, lastError: null };
+  const emptyHost: DockerHostInfo = { id: 0, name: '', kind: 'HttpsMutualTls', endpoint: 'https://192.168.1.50:2376', enabled: true, wakeOnLanMac: '', lastSeenAt: null, lastError: null };
 
   return (
     <div className="space-y-4">
@@ -3729,9 +3812,10 @@ function HostsView({ notify, refreshHosts }: { notify: Notify; refreshHosts: () 
           >
             <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-400">
               <li>On the remote machine, run Docker and make TCP <code>2376</code> reachable from this host.</li>
-              <li><strong>Easiest:</strong> click <em>Generate agent</em>, copy the compose file to the remote host and run it. It starts DockManager in <code>--agent</code> mode with a client-certificate-protected endpoint.</li>
-              <li>In the enrollment dialog click <em>Add as host</em> — the endpoint and certificates are pre-filled.</li>
-              <li>Already have a TLS-enabled daemon? Add a <em>Remote over mTLS</em> host and paste the client certificate, key and CA it trusts.</li>
+              <li><strong>Easiest:</strong> click <em>Generate agent</em>, save the three files from the compose comments into <code>./agent-certs</code> (<code>server.crt</code>, <code>server.key</code>, <code>ca.crt</code>) and run the compose file. The agent serves a certificate signed by DockManager's internal CA, so both sides of the mTLS handshake validate with no host-level trust setup.</li>
+              <li>In the enrollment dialog click <em>Add as host</em> — the <code>https://</code> endpoint and client certificates are pre-filled.</li>
+              <li>Already have a TLS-enabled daemon? Add a <em>Remote over mTLS</em> host with an <code>https://host:2376</code> endpoint and paste the client certificate, key and the server's certificate (or its CA).</li>
+              <li>No usable certificates? Run the daemon with plain TCP (<code>-H tcp://0.0.0.0:2375</code>) and use an <code>http://host:2375</code> endpoint. This is unauthenticated — restrict it to a trusted network.</li>
               <li>Click <em>Test</em>, then pick the host in the top-bar host switcher to manage it from this single location.</li>
             </ol>
           </Section>
@@ -3795,8 +3879,8 @@ function HostsView({ notify, refreshHosts }: { notify: Notify; refreshHosts: () 
         <Modal title="mTLS agent enrollment" onClose={() => setEnrollment(null)} wide>
           <p className="mb-1 text-xs text-slate-400">Endpoint: <code>{enrollment.endpoint}</code></p>
           <p className="mb-2 text-[11px] text-slate-400">
-            Run this compose file on the remote host, then add it as a host. The client certificates are
-            already attached to the pre-filled form.
+            Save the three certificate files listed in the compose comments into <code>./agent-certs</code> on the
+            remote host, then run it and click <em>Add as host</em>. The client certificates are pre-filled for you.
           </p>
           <div className="relative">
             <pre className="max-h-80 overflow-auto rounded-lg bg-ink-950 p-3 font-mono text-[11px] text-slate-300">{enrollment.compose}</pre>
@@ -3878,8 +3962,9 @@ function EnrollAgentModal({
     <Modal title="Generate an mTLS agent" onClose={onClose}>
       <div className="space-y-3">
         <p className="text-xs text-slate-400">
-          Produces a client certificate and a compose file. Run the compose file on the remote host, then add it as a
-          Docker host. Nothing is created on the remote until you run it.
+          Produces the agent's client and server certificates plus a compose file. Save the certificate files it
+          lists into <code>./agent-certs</code> on the remote host and run the compose file, then add it as a Docker
+          host. Nothing is created on the remote until you run it.
         </p>
         <Field label="Agent name" hint="A label for this host, e.g. homelab-node-2.">
           <input className="input" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} />
@@ -3936,7 +4021,7 @@ function HostForm({
             </select>
           </Field>
         </div>
-        <Field label="Endpoint" hint={draft.kind === 'UnixSocket' ? 'unix:///var/run/docker.sock' : 'tcp://remote-host:2376'}>
+        <Field label="Endpoint" hint={draft.kind === 'UnixSocket' ? 'unix:///var/run/docker.sock' : 'https://remote-host:2376'}>
           <input className="input font-mono text-xs" value={draft.endpoint} onChange={(e) => setDraft({ ...draft, endpoint: e.target.value })} />
         </Field>
         <div className="flex items-center gap-2"><Toggle checked={draft.enabled} onChange={(value) => setDraft({ ...draft, enabled: value })} label="Enabled" /><span className="text-sm">Enabled</span></div>
@@ -3951,7 +4036,7 @@ function HostForm({
                 them for you and pre-fills this form.
               </InfoTip>
             </div>
-            <p className="text-[11px] text-slate-400">Paste PEM blocks (BEGIN CERTIFICATE / BEGIN … PRIVATE KEY).</p>
+            <p className="text-[11px] text-slate-400">Paste PEM blocks (BEGIN CERTIFICATE / BEGIN … PRIVATE KEY). Leave a field blank to keep the saved certificate.</p>
             <Field label="Client certificate (PEM)">
               <textarea className="input h-20 font-mono text-[10px]" value={certs.clientCertPem} onChange={(e) => setCerts({ ...certs, clientCertPem: e.target.value })} spellCheck={false} />
             </Field>
@@ -5219,7 +5304,9 @@ function SettingsView({ notify }: { notify: Notify }) {
       <div className="grid gap-4 lg:grid-cols-2">
         <Section title="System information" info="Runtime facts reported by the server.">
           <dl className="grid grid-cols-2 gap-y-2 text-sm">
-            <dt className="text-slate-400">Version</dt><dd className="text-right font-mono text-xs">v{info?.version ?? '?'}</dd>
+            <dt className="text-slate-400">App version</dt><dd className="text-right font-mono text-xs">{info?.version ? `v${info.version}` : '—'}</dd>
+            <dt className="text-slate-400">Build token</dt><dd className="truncate text-right font-mono text-[10px] text-slate-400" title={info?.appVersion}>{info?.appVersion ?? '—'}</dd>
+            <dt className="text-slate-400">Boot ID</dt><dd className="text-right font-mono text-xs">{info?.bootId ?? '—'}</dd>
             <dt className="text-slate-400">Portal domain</dt><dd className="text-right font-mono text-xs">{info?.portalDomain ?? '—'}</dd>
             <dt className="text-slate-400">Data directory</dt><dd className="text-right font-mono text-xs">{info?.dataDirectory ?? '—'}</dd>
             <dt className="text-slate-400">Uptime</dt><dd className="text-right text-xs">{uptimeHours}h</dd>

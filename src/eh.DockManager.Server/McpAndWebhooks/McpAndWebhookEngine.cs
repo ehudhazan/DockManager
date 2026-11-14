@@ -1210,6 +1210,8 @@ public sealed class McpServer
                 host.Name = Arg("name");
                 if (Arg("endpoint").Length > 0) host.Endpoint = Arg("endpoint");
                 if (Enum.TryParse<DockerHostKind>(Arg("kind"), true, out var kind)) host.Kind = kind;
+                if (host.Kind != DockerHostKind.UnixSocket)
+                    host.Endpoint = DockerSocketClient.NormalizeEndpoint(host.Endpoint);
                 if (args.ValueKind == JsonValueKind.Object && args.TryGetProperty("enabled", out _)) host.Enabled = ArgBool("enabled");
                 if (Arg("wakeOnLanMac").Length > 0) host.WakeOnLanMac = Arg("wakeOnLanMac");
                 if (Arg("wakeOnLanBroadcast").Length > 0) host.WakeOnLanBroadcast = Arg("wakeOnLanBroadcast");

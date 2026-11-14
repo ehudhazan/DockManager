@@ -4,7 +4,7 @@ title: UI & UX conventions
 description: The design system, navigation model, and mobile behaviour of the eh.DockManager React client, including the icon set, info tooltips, clickable surfaces, and role-based views.
 tags: [ui, ux, frontend, react, design-system, mobile]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T23:58:02Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T11:04:22Z }
 sources:
   - id: client-src
     resource: ../../src/eh.DockManager.Client/src
@@ -49,6 +49,14 @@ mobile. This concept records the conventions so later changes stay consistent.[^
   does the real work: a balloon left in place enlarged the nearest scroll container (the blank
   side-scroll on a phone), and inside a card its `backdrop-filter` made the card the containing
   block for a fixed descendant, so it was measured against the card instead of the viewport.
+* **Toasts.** `Toast` is a single transient notification. On a phone it spans the viewport width
+  between 0.75rem margins — the old `left-1/2` (no `right`/width) capped the shrink-to-fit width at
+  ~50vw, which is why it looked narrow; from `md` up it shrinks to content (max 28rem) and centres. It
+  animates in (`animate-toastIn`) and out (`animate-toastOut`, 220 ms), using the independent
+  `translate`/`scale` CSS properties so the centring `-translate-x-1/2` survives, with a
+  `motion-reduce` opt-out. The lifetime defaults to 3.6 s (5.2 s for errors) and is overridable per
+  call; the **Install app (PWA)** instructions pass `0` for a **sticky** toast that stays until
+  dismissed, because they are long. It stays at `z-[70]`.
 * **Clickable surfaces.** Dashboard `StatTile`s navigate to the area they describe
   (Containers, Images, Proxy routes, Docker hosts, K8s clusters, Uptime/Settings); portal cards
   keep their Open / Terminal / Edit actions always visible instead of hover-only.
@@ -119,8 +127,11 @@ mobile. This concept records the conventions so later changes stay consistent.[^
   `ehdm.logs.timestamps`, default on) that maps to Docker's `timestamps` flag; stack/pod logs honour the
   same preference.
 * **Server disconnection & version skew.** A poll of `GET /api/system/health` raises a **"Server
-  disconnected"** banner when the server is unreachable and reloads the shell (after refreshing the
-  service worker) when the returned `appVersion` changes; see
+  disconnected"** banner when the server is unreachable. When the returned `appVersion` changes (a
+  redeploy) an **"App upgraded"** banner names the new version and reloads the shell after a short
+  grace period (refreshing the service worker first); the running app version is shown in the
+  desktop sidebar footer, the mobile **More** sheet footer (every role), and Settings → System
+  information (with the boot id and build token). See
   [Client/server version negotiation & asset freshness](/project/client-server-versioning.md).
 * **Navigation always starts at the top.** Changing views scrolls the window and `main` back to the top,
   so a deep page such as Images never opens mid-scroll after a navigation.

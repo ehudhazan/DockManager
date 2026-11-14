@@ -4,7 +4,7 @@ title: Stack constraints
 description: Binding dependency, build, container, port, and storage constraints for eh.DockManager, including the audited NuGet allowlist and banned packages.
 tags: [constraints, dependencies, build, security]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T09:12:01Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T11:49:52Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -57,6 +57,11 @@ failures, and are accepted per the allowlist below.
   `mcr.microsoft.com/dotnet/runtime-deps:11.0-azurelinux3.0-distroless`) and can be
   overridden at build time with `--build-arg`.
 * Non-root user `$APP_UID` `64198` (`ENV APP_UID=64198`, `USER $APP_UID`).
+* **Published image:** `ehudhazan/dockmanager` (Docker Hub, `latest` by default).
+  `docker-compose.yml` sets `image: ehudhazan/dockmanager:latest` **and** keeps its `build:`
+  section, so `./build.sh` / `docker compose build` still builds from source and tags
+  `ehudhazan/dockmanager:latest`, while `docker compose pull` fetches the published tag. The
+  container and compose project keep the name `eh-dockmanager`.
 * Hardened compose flags: `--read-only`, `--cap-drop=ALL`,
   `--security-opt=no-new-privileges:true`.[^prompt-md]
 

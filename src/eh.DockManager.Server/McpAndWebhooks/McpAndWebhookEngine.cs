@@ -1012,6 +1012,9 @@ public sealed class McpServer
             case "delete_portal_app":
             {
                 var subdomain = Arg("subdomain");
+                var existing = await _store.GetPortalAppBySubdomainAsync(subdomain, ct).ConfigureAwait(false);
+                if (existing is not null && PortalSelf.IsSelf(existing))
+                    return Error(idNode, -32003, "DockManager's own portal app cannot be deleted via MCP.");
                 await _store.DeletePortalAppAsync(subdomain, ct).ConfigureAwait(false);
                 await _portal.RebuildAsync(ct).ConfigureAwait(false);
                 await Audit("portal.delete", subdomain, null);
@@ -1486,7 +1489,7 @@ public sealed class McpServer
             ("delete_user", Tool("delete_user", "Delete a non-admin user account (Admin accounts cannot be deleted).", new JsonObject { ["username"] = Str("Target username"), ["id"] = Num("Target user id (alternative)") }, Req())),
             ("list_portal_apps", Tool("list_portal_apps", "List portal applications.", new JsonObject(), Req())),
             ("save_portal_app", Tool("save_portal_app", "Create or update a portal app.", new JsonObject { ["subdomain"] = Str("Subdomain"), ["name"] = Str("Display name"), ["category"] = Str("Category"), ["icon"] = Str("Icon URL"), ["auth"] = Str("Public | Sso | Admin"), ["autoscale"] = Str("None | Idle15m | Idle1h"), ["targetPort"] = Num("Container port"), ["externalUrl"] = Str("External URL"), ["hidden"] = Bool("Hide from the portal") }, Req("subdomain"))),
-            ("delete_portal_app", Tool("delete_portal_app", "Delete a portal app.", new JsonObject { ["subdomain"] = Str("Subdomain") }, Req("subdomain"))),
+            ("delete_portal_app", Tool("delete_portal_app", "Delete a portal app (DockManager's own entry is protected).", new JsonObject { ["subdomain"] = Str("Subdomain") }, Req("subdomain"))),
             ("refresh_portal", Tool("refresh_portal", "Re-run portal auto-discovery.", new JsonObject(), Req())),
             ("get_settings", Tool("get_settings", "Read portal domain, LAN IP and certificate details.", new JsonObject(), Req())),
             ("update_settings", Tool("update_settings", "Update portal domain / LAN IP (optionally regenerate the certificate).", new JsonObject { ["portalDomain"] = Str("Portal domain"), ["lanIp"] = Str("LAN IP"), ["regenerateCertificate"] = Bool("Regenerate certificate") }, Req())),

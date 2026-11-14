@@ -4,7 +4,7 @@ title: Host preparation
 description: Host-side steps required before the compose stack starts: bind-mount ownership, the host docker group id, and the empty-password bootstrap fallback.
 tags: [deployment, compose, permissions, bootstrap]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T10:05:49Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:14:28Z }
 sources:
   - id: compose-file
     resource: ../../docker-compose.yml
@@ -97,3 +97,7 @@ container list confirms the Docker socket is reachable through the `group_add` g
 
   The `.db` is owned by `64198:root` mode `644`, so on a host where the operator is not
   `64198`/root it can only be edited through a root container (e.g. `busybox`) or `sudo`.
+* **Image name.** The stack runs the Docker Hub image `ehudhazan/dockmanager:latest`
+  (`docker-compose.yml` keeps its `build:` section, so `./build.sh` / `docker compose build`
+  still retag it locally). The container and compose project are still named `eh-dockmanager`,
+  so `docker logs eh-dockmanager` and the `.env`/`./data` steps above are unchanged.

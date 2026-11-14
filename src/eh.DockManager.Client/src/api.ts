@@ -19,6 +19,8 @@ import type {
   NetworkSummary,
   PasskeyInfo,
   PortalApp,
+  PortalAppInput,
+  PortalCandidatesResponse,
   RegistryInfo,
   SessionUser,
   StackStats,
@@ -128,6 +130,11 @@ export const api = {
   deletePortalApp: (subdomain: string) => del<{ deleted: boolean }>(`/api/portal/apps/${subdomain}`),
   reorderPortalApps: (order: string[]) => post<{ reordered: number }>('/api/portal/apps/reorder', { order }),
   refreshPortal: () => post<{ refreshed: boolean }>('/api/portal/refresh'),
+  portalCandidates: (params: { hostId?: number; clusterId?: number }) =>
+    get<PortalCandidatesResponse>(
+      `/api/portal/available?${params.hostId !== undefined ? `hostId=${params.hostId}` : `clusterId=${params.clusterId}`}`
+    ),
+  bulkAddPortalApps: (apps: PortalAppInput[]) => post<{ added: number }>('/api/portal/apps/bulk', { apps }),
 
   // ── Stacks ──────────────────────────────────────────────────────────────
   stacks: () => get<StackSummary[]>('/api/stacks'),

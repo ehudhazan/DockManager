@@ -4,7 +4,7 @@ title: Remote Docker hosts
 description: How DockManager connects to a remote Docker engine — the Unix-socket, mTLS-daemon and single-binary-agent host kinds, the endpoint scheme rules, the certificate validation chain on each side, and the plain-TCP fallback when no certificate is usable.
 tags: [docker, hosts, mtls, agent, tls, runbook]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T06:12:24Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:14:28Z }
 sources:
   - id: docker-client
     resource: ../../src/eh.DockManager.Server/Docker/DockerSocketClient.cs
@@ -88,7 +88,8 @@ without reconfiguring the remote `dockerd`.[^program][^cert-manager]
 1. **Generate agent** (`POST /api/hosts/agent/enroll`) with a name and the remote host address.
    It issues a **client** certificate (DockManager → agent) and a **server** certificate (SAN =
    the remote host address + `localhost`), both signed by the internal root CA, and returns a
-   compose file plus an `https://host:2376` endpoint.
+   compose file (the generated service runs the `ehudhazan/dockmanager:latest` image) plus an
+   `https://host:2376` endpoint.
 2. **Remote:** save `server.crt`, `server.key` and `ca.crt` from the compose comments into
    `./agent-certs` (mounted at `/certs`), then run the compose service. The command is
    `--agent --port 2376 --tls-cert /certs/server.crt --tls-key /certs/server.key --tls-ca /certs/ca.crt`.

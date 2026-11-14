@@ -467,14 +467,14 @@ public sealed class PortalDiscoveryService : BackgroundService
         return false;
     }
 
-    private static string ResolveSubdomain(Dictionary<string, string> labels, string? name, string containerId)
+    internal static string ResolveSubdomain(Dictionary<string, string> labels, string? name, string containerId)
     {
         if (labels.TryGetValue("eh.portal.subdomain", out var sub) && !string.IsNullOrWhiteSpace(sub))
             return Slug(sub);
         return Slug(name ?? containerId[..Math.Min(12, containerId.Length)]);
     }
 
-    private static int? ResolvePort(Dictionary<string, string> labels, JsonElement container)
+    internal static int? ResolvePort(Dictionary<string, string> labels, JsonElement container)
     {
         if (labels.TryGetValue("eh.portal.port", out var portStr) && int.TryParse(portStr, out var explicitPort))
             return explicitPort;
@@ -491,7 +491,7 @@ public sealed class PortalDiscoveryService : BackgroundService
         return null;
     }
 
-    private static string Slug(string value)
+    internal static string Slug(string value)
     {
         var sb = new System.Text.StringBuilder(value.Length);
         foreach (var c in value.ToLowerInvariant())

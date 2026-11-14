@@ -27,6 +27,8 @@ export interface PortalApp {
   hidden: boolean;
   manual: boolean;
   autoDiscovered: boolean;
+  /** True when this is DockManager's own catalogue entry (its own container). */
+  self?: boolean;
   url?: string;
 }
 
@@ -34,6 +36,45 @@ export interface LandingResponse {
   domain: string;
   authenticated: boolean;
   apps: PortalApp[];
+}
+
+export type PortalCandidateSource = 'container' | 'service' | 'ingress' | 'httproute';
+
+/** One app the portal could still add, from a Docker host or Kubernetes cluster. */
+export interface PortalCandidate {
+  key: string;
+  source: PortalCandidateSource;
+  name: string;
+  subdomain: string;
+  category: string;
+  containerId?: string | null;
+  containerName?: string | null;
+  hostId?: number | null;
+  targetPort?: number | null;
+  externalUrl?: string | null;
+  detail: string;
+  present: boolean;
+}
+
+export interface PortalCandidatesResponse {
+  kind: 'docker' | 'k8s';
+  id: number;
+  label: string;
+  items: PortalCandidate[];
+}
+
+/** The editable payload sent by the bulk-add dialog. */
+export interface PortalAppInput {
+  subdomain: string;
+  name: string;
+  category: string;
+  auth: PortalApp['auth'];
+  autoscale: PortalApp['autoscale'];
+  targetPort?: number | null;
+  containerId?: string | null;
+  containerName?: string | null;
+  hostId?: number | null;
+  externalUrl?: string | null;
 }
 
 export interface StackSummary {

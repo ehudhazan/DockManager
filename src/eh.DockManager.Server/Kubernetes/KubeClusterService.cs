@@ -167,6 +167,21 @@ public sealed class KubeClusterService
         return JsonNode.Parse(JsonSerializer.Serialize(response.Body)) ?? new JsonArray();
     }
 
+    /// <summary>Lists Ingresses (networking.k8s.io/v1) across all namespaces, or one namespace.</summary>
+    public async Task<JsonNode> ListIngressesAsync(KubeCluster cluster, string? ns, CancellationToken ct = default)
+    {
+        var client = BuildClient(cluster);
+        if (string.IsNullOrEmpty(ns) || ns == "*")
+        {
+            var all = await client.NetworkingV1.ListIngressForAllNamespacesWithHttpMessagesAsync(cancellationToken: ct)
+                .ConfigureAwait(false);
+            return JsonNode.Parse(JsonSerializer.Serialize(all.Body)) ?? new JsonArray();
+        }
+        var response = await client.NetworkingV1.ListNamespacedIngressWithHttpMessagesAsync(ns, cancellationToken: ct)
+            .ConfigureAwait(false);
+        return JsonNode.Parse(JsonSerializer.Serialize(response.Body)) ?? new JsonArray();
+    }
+
     public async Task<string> GetPodLogsAsync(KubeCluster cluster, string pod, string ns, string? container,
         int tailLines = 500, CancellationToken ct = default, bool timestamps = true)
     {

@@ -62,6 +62,8 @@ import type {
   MetricSample,
   PasskeyInfo,
   PortalApp,
+  PortalAppInput,
+  PortalCandidate,
   RegistryInfo,
   SessionUser,
   StackSummary,
@@ -1056,6 +1058,7 @@ function PortalLandingView({ notify, openTerminal, isAdmin }: { notify: Notify; 
   const [liveMetrics, setLiveMetrics] = useState(true);
   const [showHidden, setShowHidden] = useState(false);
   const [editing, setEditing] = useState<PortalApp | null>(null);
+  const [addingAvailable, setAddingAvailable] = useState(false);
 
   const load = useCallback(() => {
     api.landing(showHidden && isAdmin).then(setLanding).catch((e) => notify((e as Error).message, 'error'));
@@ -1067,6 +1070,16 @@ function PortalLandingView({ notify, openTerminal, isAdmin }: { notify: Notify; 
     try {
       await api.savePortalApp({ ...app, hidden: !app.hidden });
       notify(app.hidden ? 'App shown on the portal' : 'App hidden from the portal', 'success');
+      load();
+    } catch (error) {
+      notify((error as Error).message, 'error');
+    }
+  };
+
+  const deleteApp = async (app: PortalApp) => {
+    try {
+      await api.deletePortalApp(app.subdomain);
+      notify('Application deleted', 'success');
       load();
     } catch (error) {
       notify((error as Error).message, 'error');
@@ -1122,6 +1135,11 @@ function PortalLandingView({ notify, openTerminal, isAdmin }: { notify: Notify; 
               <Icon name="refreshCw" className="h-4 w-4" /> Refresh
             </button>
             {isAdmin && (
+              <button className="btn-ghost" onClick={() => setAddingAvailable(true)}>
+                <Icon name="layoutGrid" className="h-4 w-4" /> Add available
+              </button>
+            )}
+            {isAdmin && (
               <button className="btn-primary" onClick={() => setEditing(emptyPortalApp())}>
                 <Icon name="plus" className="h-4 w-4" /> Add app
               </button>
@@ -1169,6 +1187,7 @@ function PortalLandingView({ notify, openTerminal, isAdmin }: { notify: Notify; 
                 onOpen={() => window.open(app.url ?? '#', '_blank')}
                 onTerminal={() => app.containerName && openTerminal(app.name, api.execUrl(app.containerName, '/bin/sh'))}
                 onToggleHidden={() => toggleHidden(app)}
+                onDelete={() => deleteApp(app)}
                 canMoveUp={index > 0}
                 canMoveDown={index < apps.length - 1}
                 onMoveUp={() => moveApp(app, -1)}
@@ -1196,6 +1215,14 @@ function PortalLandingView({ notify, openTerminal, isAdmin }: { notify: Notify; 
           notify={notify}
         />
       )}
+
+      {addingAvailable && (
+        <PortalAvailableDialog
+          notify={notify}
+          onClose={() => setAddingAvailable(false)}
+          onAdded={() => { setAddingAvailable(false); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -1208,6 +1235,7 @@ function PortalCard({
   onOpen,
   onTerminal,
   onToggleHidden,
+  onDelete,
   canMoveUp,
   canMoveDown,
   onMoveUp,
@@ -1220,6 +1248,7 @@ function PortalCard({
   onOpen: () => void;
   onTerminal: () => void;
   onToggleHidden: () => void;
+  onDelete: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onMoveUp: () => void;
@@ -1394,6 +1423,14 @@ function PortalCard({
               <Icon name="pencil" className="h-3.5 w-3.5" />
             </button>
           )}
+          {canEdit && !app.self && (
+            <ConfirmButton
+              className="px-2.5 py-1.5"
+              label="Delete"
+              confirmLabel="Delete app"
+              onConfirm={onDelete}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -1486,7 +1523,12 @@ function PortalAppEditor({
           </div>
         </div>
         <div className="flex items-center justify-end gap-2 pt-2">
-          {!isNew && draft.manual && (
+          {!isNew && draft.self && (
+            <p className="mr-auto text-[11px] text-slate-400">
+              DockManager's own entry — it can't be deleted from here.
+            </p>
+          )}
+          {!isNew && !draft.self && (
             <ConfirmButton
               className="mr-auto"
               label="Delete"
@@ -1504,6 +1546,256 @@ function PortalAppEditor({
           )}
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Portal — bulk add from one host's available apps
+// ────────────────────────────────────────────────────────────────────────────
+function PortalAvailableDialog({
+  notify,
+  onClose,
+  onAdded
+}: {
+  notify: Notify;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [hosts, setHosts] = useState<DockerHostInfo[]>([]);
+  const [clusters, setClusters] = useState<KubeClusterInfo[]>([]);
+  const [selection, setSelection] = useState('');
+  const [candidates, setCandidates] = useState<PortalCandidate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [chosen, setChosen] = useState<Record<string, PortalAppInput>>({});
+  const [busy, setBusy] = useState(false);
+
+  const enabledHosts = useMemo(() => hosts.filter((host) => host.enabled), [hosts]);
+  const enabledClusters = useMemo(() => clusters.filter((cluster) => cluster.enabled), [clusters]);
+
+  useEffect(() => {
+    Promise.all([api.hosts(), api.clusters()])
+      .then(([hostList, clusterList]) => {
+        setHosts(hostList);
+        setClusters(clusterList);
+        const docker = hostList.find((host) => host.enabled);
+        const kubernetes = clusterList.find((cluster) => cluster.enabled);
+        if (docker) setSelection(`docker:${docker.id}`);
+        else if (kubernetes) setSelection(`k8s:${kubernetes.id}`);
+      })
+      .catch((error) => notify((error as Error).message, 'error'));
+  }, [notify]);
+
+  useEffect(() => {
+    if (!selection) return undefined;
+    const [kind, id] = selection.split(':');
+    setLoading(true);
+    setChosen({});
+    setCandidates([]);
+    api
+      .portalCandidates(kind === 'k8s' ? { clusterId: Number(id) } : { hostId: Number(id) })
+      .then((result) => setCandidates(result.items))
+      .catch((error) => notify((error as Error).message, 'error'))
+      .finally(() => setLoading(false));
+    return undefined;
+  }, [selection, notify]);
+
+  const draftFrom = (candidate: PortalCandidate): PortalAppInput => ({
+    subdomain: candidate.subdomain,
+    name: candidate.name,
+    category: candidate.category,
+    auth: 'Sso',
+    autoscale: 'None',
+    targetPort: candidate.targetPort ?? null,
+    containerId: candidate.containerId ?? null,
+    containerName: candidate.containerName ?? null,
+    hostId: candidate.hostId ?? null,
+    externalUrl: candidate.externalUrl ?? null
+  });
+
+  const toggle = (candidate: PortalCandidate) => {
+    if (candidate.present) return;
+    setChosen((current) => {
+      const next = { ...current };
+      if (next[candidate.key]) delete next[candidate.key];
+      else next[candidate.key] = draftFrom(candidate);
+      return next;
+    });
+  };
+
+  const update = (key: string, patch: Partial<PortalAppInput>) =>
+    setChosen((current) => (current[key] ? { ...current, [key]: { ...current[key], ...patch } } : current));
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return candidates;
+    return candidates.filter((candidate) =>
+      `${candidate.name} ${candidate.subdomain} ${candidate.detail} ${candidate.source}`.toLowerCase().includes(q)
+    );
+  }, [candidates, query]);
+
+  const selected = useMemo(() => Object.values(chosen), [chosen]);
+
+  const selectAllVisible = () =>
+    setChosen((current) => {
+      const next = { ...current };
+      for (const candidate of visible) {
+        if (candidate.present || next[candidate.key]) continue;
+        next[candidate.key] = draftFrom(candidate);
+      }
+      return next;
+    });
+
+  const add = async () => {
+    if (selected.length === 0) return;
+    setBusy(true);
+    try {
+      const result = await api.bulkAddPortalApps(selected);
+      notify(`${result.added} app${result.added === 1 ? '' : 's'} added`, 'success');
+      onAdded();
+    } catch (error) {
+      notify((error as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal wide title="Add available apps" onClose={onClose}>
+      <div className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Host" hint="Pick a connected Docker host or Kubernetes cluster to load its apps.">
+            <select className="input" value={selection} onChange={(event) => setSelection(event.target.value)}>
+              <option value="">Select a host…</option>
+              {enabledHosts.length > 0 && (
+                <optgroup label="Docker hosts">
+                  {enabledHosts.map((host) => (
+                    <option key={`docker:${host.id}`} value={`docker:${host.id}`}>{host.name}</option>
+                  ))}
+                </optgroup>
+              )}
+              {enabledClusters.length > 0 && (
+                <optgroup label="Kubernetes clusters">
+                  {enabledClusters.map((cluster) => (
+                    <option key={`k8s:${cluster.id}`} value={`k8s:${cluster.id}`}>{cluster.name}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </Field>
+          <div className="relative self-end">
+            <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input className="input pl-9" placeholder="Search apps…" value={query} onChange={(event) => setQuery(event.target.value)} />
+          </div>
+        </div>
+
+        <ul className="max-h-[45vh] space-y-2 overflow-y-auto pr-1">
+          {visible.map((candidate) => {
+            const draft = chosen[candidate.key];
+            const controlId = `cand-${candidate.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+            return (
+              <li
+                key={candidate.key}
+                className={classNames(
+                  'rounded-lg border p-3',
+                  candidate.present ? 'border-ink-800 opacity-60' : draft ? 'border-accent-soft/60 bg-ink-900' : 'border-ink-800'
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <input
+                    id={controlId}
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={!!draft}
+                    disabled={candidate.present}
+                    onChange={() => toggle(candidate)}
+                  />
+                  <label htmlFor={controlId} className={classNames('min-w-0 flex-1', candidate.present ? 'cursor-default' : 'cursor-pointer')}>
+                    <span className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-sm font-medium">{candidate.name}</span>
+                      <span className="rounded border border-ink-700 bg-ink-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-slate-400">
+                        {candidate.source}
+                      </span>
+                      {candidate.present && (
+                        <span className="rounded border border-emerald-800/60 bg-emerald-950/60 px-1.5 py-0.5 text-[10px] text-emerald-300">
+                          already added
+                        </span>
+                      )}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-400">{candidate.detail}</span>
+                  </label>
+                </div>
+
+                {draft && (
+                  <div className="mt-3 grid gap-2 border-t border-ink-800 pt-3 sm:grid-cols-2">
+                    <Field label="Name">
+                      <input className="input" value={draft.name} onChange={(event) => update(candidate.key, { name: event.target.value })} />
+                    </Field>
+                    <Field label="Subdomain" hint="The address under the portal domain; must be unique.">
+                      <input className="input" value={draft.subdomain} onChange={(event) => update(candidate.key, { subdomain: event.target.value })} />
+                    </Field>
+                    <Field label="Category">
+                      <input className="input" value={draft.category} onChange={(event) => update(candidate.key, { category: event.target.value })} />
+                    </Field>
+                    {candidate.source === 'container' ? (
+                      <Field label="Target port" hint="Container port to proxy to.">
+                        <input
+                          className="input"
+                          type="number"
+                          value={draft.targetPort ?? ''}
+                          onChange={(event) => update(candidate.key, { targetPort: event.target.value ? Number(event.target.value) : null })}
+                        />
+                      </Field>
+                    ) : (
+                      <Field label="External URL" info="Kubernetes Service address or Ingress/HTTPRoute host the portal proxies to.">
+                        <input className="input" value={draft.externalUrl ?? ''} onChange={(event) => update(candidate.key, { externalUrl: event.target.value })} />
+                      </Field>
+                    )}
+                    <Field label="Access" info="Public needs no login; SSO requires any signed-in user; Admin is restricted to administrators.">
+                      <select className="input" value={draft.auth} onChange={(event) => update(candidate.key, { auth: event.target.value as PortalApp['auth'] })}>
+                        <option value="Public">Public</option>
+                        <option value="Sso">Signed-in users</option>
+                        <option value="Admin">Administrators</option>
+                      </select>
+                    </Field>
+                    <Field label="Scale to zero" info="Idle apps are stopped automatically and woken on the next request.">
+                      <select className="input" value={draft.autoscale} onChange={(event) => update(candidate.key, { autoscale: event.target.value as PortalApp['autoscale'] })}>
+                        <option value="None">Never</option>
+                        <option value="Idle15m">After 15 minutes idle</option>
+                        <option value="Idle1h">After 1 hour idle</option>
+                      </select>
+                    </Field>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+
+        {!loading && visible.length === 0 && (
+          <p className="py-6 text-center text-xs text-slate-400">
+            {selection
+              ? 'Nothing available here — every app on this host is already in the portal.'
+              : 'Select a host to load its apps.'}
+          </p>
+        )}
+        {loading && <p className="py-6 text-center text-xs text-slate-400">Loading apps…</p>}
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-ink-800 pt-3">
+          <div className="text-xs text-slate-400">
+            {visible.length} available · {selected.length} selected
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="btn-ghost" onClick={selectAllVisible} disabled={loading || visible.length === 0}>Select all</button>
+            <button className="btn-ghost" onClick={() => setChosen({})} disabled={selected.length === 0}>Clear</button>
+            <button className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn-primary" onClick={add} disabled={busy || selected.length === 0}>
+              {busy ? 'Adding…' : `Add selected${selected.length ? ` (${selected.length})` : ''}`}
+            </button>
+          </div>
         </div>
       </div>
     </Modal>

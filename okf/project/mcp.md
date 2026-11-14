@@ -4,7 +4,7 @@ title: MCP server permissions & audit
 description: How the built-in MCP server authenticates scoped bearer keys, the resource:action[:target] scope grammar it enforces, the tool surface it exposes, and how every MCP action is attributed in the audit log.
 tags: [mcp, security, permissions, audit, api, scopes]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:41:24Z }
 sources:
   - id: mcp-src
     resource: ../../src/eh.DockManager.Server/McpAndWebhooks/McpAndWebhookEngine.cs
@@ -94,6 +94,14 @@ provenance feed shows who changed which key. Because the key **name** is what ap
 | `user` | `list_users`, `get_user`, `create_user`, `update_user`, `delete_user` — **all non-admin users only** |
 | `system` | `get_settings`, `update_settings` |
 | `audit` | `list_audit` |
+
+## Portal: DockManager's own entry protected
+
+`delete_portal_app` refuses DockManager's own catalogue entry — the container that serves the
+management UI — with JSON-RPC `-32003`. The same shared rule (`Portal/PortalSelf.cs`) guards
+`DELETE /api/portal/apps/{subdomain}` with `409`. See
+[Portal visibility & ordering](/project/portal.md) and
+[Operation guards across UI, MCP and server](/project/operation-guards.md).
 
 ## Users: all non-admin users, Admin protected
 

@@ -4,7 +4,7 @@ title: Delivered implementation
 description: What was actually built and verified for eh.DockManager, the generated file set, runtime behaviours exercised, and the deviations from PROMPT.md discovered during the build.
 tags: [status, implementation, build, deviations]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T11:04:22Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:36:33Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -400,6 +400,62 @@ bottom **More** sheet now carries a footer line `eh.DockManager · v2026.11.14.8
 prop from `App`.
 
 Verified in the build: `npm run typecheck` and `npm run build` pass. No `verified` entry was added —
+self-run checks are not independent verification.
+
+# Thirteenth pass — portal app delete UI
+
+The Portal exposed no way to delete an app: `DELETE /api/portal/apps/{subdomain}` and the MCP
+`delete_portal_app` tool existed, but the only UI affordance was inside the Edit dialog and gated
+on `manual`, so an auto-discovered app could not be deleted at all.
+
+* Each Portal card gained a two-step **Delete** button (admins) in its action row, and the editor's
+  Delete button is now offered for every app (the `manual`-only guard is gone). Both call
+  `api.deletePortalApp(subdomain)` and reload the landing list.
+* While tracing it, two behaviours were confirmed and recorded in
+  [Portal visibility & ordering](/project/portal.md): a delete of an **auto-discovered** app is not
+  durable — `PortalDiscoveryService` reconciles every 30 s and re-creates any container that still
+  exposes a portal — so only hiding it, or removing the `eh.portal.*` labels, removes it for good;
+  and the card's hide button silently flips an auto-discovered app to `Manual`, because
+  `PUT /api/portal/apps` forces `manual = true`.
+* DockManager's **own** catalogue entry is flagged `self` on `GET /api/portal/landing` (one shared
+  rule, `Portal/PortalSelf.cs`), and the Portal hides its Delete button on both the card and the
+  editor, which instead reads "DockManager's own entry — it can't be deleted from here." The guard
+  is also enforced server-side: `DELETE /api/portal/apps/{subdomain}` returns `409` and the MCP
+  `delete_portal_app` tool returns `-32003` for the self entry.
+
+Verified in the build: `npm run typecheck` and `npm run build` pass (no live browser walk). No
+`verified` entry was added — self-run checks are not independent verification.
+
+# Fourteenth pass — add available apps in bulk
+
+The Portal could only add apps one at a time through the editor, with the subdomain typed by hand.
+It now has an **Add available** button (admins) that opens a dialog over one connected host.
+
+* **New server surface** — `src/eh.DockManager.Server/Portal/PortalAppCandidates.cs` (a supporting
+  addition to the PROMPT.md §9 file list, like `QrCodeGenerator.cs` and `AcmeClient.cs`): a
+  `PortalCandidateService` plus `GET /api/portal/available?hostId=<id>` / `?clusterId=<id>` and
+  `POST /api/portal/apps/bulk`. Docker candidates come from the host's containers; Kubernetes
+  candidates from public Services (LoadBalancer, or NodePort with an external address), Ingresses
+  and Gateway API HTTPRoutes — `KubeClusterService` gained `ListIngressesAsync`. A candidate is
+  flagged `present` when its container/URL/subdomain is already in the catalogue, and the bulk
+  endpoint rejects the whole batch (`409` + `conflicts`) on empty or duplicate subdomains.
+* **Discovery helpers reused** — `ResolveSubdomain`/`ResolvePort`/`Slug` on `PortalDiscoveryService`
+  became `internal static` so a hand-picked candidate gets the same name/subdomain/port a discovered
+  one would.
+* **Client** — the Portal header gained **Add available**; the new `PortalAvailableDialog` picks a
+  Docker host or Kubernetes cluster, searches, multi-selects with a checkbox per row, and edits each
+  chosen app inline (name, subdomain, category, target port / external URL, access, scale-to-zero)
+  before `api.bulkAddPortalApps` writes them. `types.ts`/`api.ts` gained `PortalCandidate`,
+  `PortalCandidatesResponse`, `PortalAppInput`, `api.portalCandidates` and `api.bulkAddPortalApps`.
+
+Verified live against a throwaway instance (temp `EHDM_DATA_DIR`, ports 18080/18443/18444, admin
+login): `/api/portal/available` → `400` without a host/cluster id and `404` for an unknown cluster;
+`?hostId=1` returned the local host's container with `present: true`; `?clusterId=1` on an
+unreachable cluster degraded to an empty list (`200`); `POST /api/portal/apps/bulk` added one
+external app (`{"added":1}`), rejected a repeat and an empty subdomain with `409` + `conflicts`,
+and rejected an empty batch with `400`; `GET /api/portal/apps` showed the new `manual` row, and the
+audit list recorded `portal.bulk_add` (actor `admin`). `dotnet build` (0 errors),
+`npm run typecheck`, `npm run build` and `npm test` (38 checks) pass. No `verified` entry was added —
 self-run checks are not independent verification.
 
 # Notes

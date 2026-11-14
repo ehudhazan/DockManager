@@ -114,6 +114,7 @@ builder.Services.AddSingleton<WebhookNotifier>();
 builder.Services.AddSingleton<IEventNotifier>(sp => sp.GetRequiredService<WebhookNotifier>());
 builder.Services.AddSingleton<DynamicProxyConfigProvider>();
 builder.Services.AddSingleton<PortalProxyConfigurator>();
+builder.Services.AddSingleton<PortalCandidateService>();
 builder.Services.AddSingleton<WakeOnLanService>();
 // Registered as the concrete singleton *and* as the hosted service, so both the background
 // worker and direct callers (portal refresh, MCP) share the same reconciler instance.
@@ -1830,6 +1831,10 @@ portal.MapPut("/apps", async (HttpContext ctx) =>
 }).RequireAuthorization("eh-admin");
 portal.MapDelete("/apps/{subdomain}", async (string subdomain, CancellationToken ct) =>
 {
+    // DockManager's own entry is the management interface; never let a stray call remove it.
+    var existing = await store.GetPortalAppBySubdomainAsync(subdomain, ct);
+    if (existing is not null && PortalSelf.IsSelf(existing))
+        return Results.Conflict(new { error = "DockManager's own portal app cannot be deleted." });
     await store.DeletePortalAppAsync(subdomain, ct);
     await portalConfigurator.RebuildAsync(ct);
     return Results.Ok(new { deleted = true });
@@ -1860,6 +1865,49 @@ portal.MapPost("/refresh", async (CancellationToken ct) =>
     return Results.Ok(new { refreshed = true });
 }).RequireAuthorization("eh-admin");
 
+// Available (not-yet-catalogued) apps for one Docker host or Kubernetes cluster, used by the
+// Portal's bulk-add dialog. The client passes exactly one of hostId / clusterId.
+portal.MapGet("/available", async (HttpContext ctx, CancellationToken ct) =>
+{
+    var candidates = services.GetRequiredService<PortalCandidateService>();
+    var hostId = ctx.Request.Query["hostId"].FirstOrDefault();
+    var clusterId = ctx.Request.Query["clusterId"].FirstOrDefault();
+    if (long.TryParse(hostId, out var hid))
+    {
+        var result = await candidates.ForDockerHostAsync(hid, ct);
+        return result is null ? Results.NotFound(new { error = "Docker host not found" }) : Results.Json(result);
+    }
+    if (long.TryParse(clusterId, out var cid))
+    {
+        var result = await candidates.ForClusterAsync(cid, ct);
+        return result is null ? Results.NotFound(new { error = "Cluster not found" }) : Results.Json(result);
+    }
+    return Results.BadRequest(new { error = "hostId or clusterId is required" });
+}).RequireAuthorization("eh-admin");
+
+// Bulk-add manual portal apps (the "Add selected" action of the available-apps dialog). Any
+// empty or duplicate subdomain rejects the whole batch so nothing is half-added.
+portal.MapPost("/apps/bulk", async (HttpContext ctx, CancellationToken ct) =>
+{
+    var body = await ctx.Request.ReadFromJsonAsync<BulkPortalAppsRequest>(cancellationToken: ct);
+    if (body?.Apps is null || body.Apps.Count == 0)
+        return Results.BadRequest(new { error = "apps required" });
+    var candidates = services.GetRequiredService<PortalCandidateService>();
+    var result = await candidates.AddBulkAsync(body.Apps, ct);
+    if (result.Conflicts.Count > 0)
+        return Results.Conflict(new { error = "Subdomain already in use or invalid", conflicts = result.Conflicts });
+    await portalConfigurator.RebuildAsync(ct);
+    await store.AddAuditAsync(new AuditLog
+    {
+        Actor = ActorKind.WebUi,
+        ActorDetail = ctx.User.FindFirst(EhClaims.Username)?.Value,
+        Action = "portal.bulk_add",
+        Target = string.Join(",", body.Apps.Select(a => PortalDiscoveryService.Slug(a.Subdomain ?? "")).Where(s => s.Length > 0)),
+        Timestamp = DateTimeOffset.UtcNow
+    }, ct);
+    return Results.Json(new { added = result.Added });
+}).RequireAuthorization("eh-admin");
+
 portal.MapGet("/landing", async (HttpContext ctx, CancellationToken ct) =>
 {
     var isAdmin = ctx.User.IsInRole(nameof(UserRole.Admin));
@@ -1877,23 +1925,13 @@ portal.MapGet("/landing", async (HttpContext ctx, CancellationToken ct) =>
         PortalAuthMode.Sso => isAuthed || a.Auth == PortalAuthMode.Sso,
         _ => true
     });
-    var selfHost = Environment.MachineName;
-    var selfOverride = Environment.GetEnvironmentVariable("EHDM_SELF_CONTAINER");
-    string UrlFor(PortalApp app)
-    {
-        if (!string.IsNullOrWhiteSpace(app.ExternalUrl)) return app.ExternalUrl;
-        var isSelf =
-            (selfOverride is { Length: > 0 } &&
-             (string.Equals(app.ContainerName, selfOverride, StringComparison.OrdinalIgnoreCase) ||
-              string.Equals(app.Subdomain, selfOverride, StringComparison.OrdinalIgnoreCase))) ||
-            (!string.IsNullOrWhiteSpace(app.ContainerId) &&
-             app.ContainerId.StartsWith(selfHost, StringComparison.OrdinalIgnoreCase)) ||
-            string.Equals(app.ContainerName, selfHost, StringComparison.OrdinalIgnoreCase);
-        // DockManager itself is served at the root of the portal domain, not on a subdomain.
-        return isSelf
-            ? $"https://{portalConfigurator.PortalDomain}"
-            : $"https://{app.Subdomain}.{portalConfigurator.PortalDomain}";
-    }
+    // DockManager's own catalogue entry is flagged and protected — see PortalSelf.
+    string UrlFor(PortalApp app) =>
+        !string.IsNullOrWhiteSpace(app.ExternalUrl)
+            ? app.ExternalUrl
+            : PortalSelf.IsSelf(app)
+                ? $"https://{portalConfigurator.PortalDomain}"
+                : $"https://{app.Subdomain}.{portalConfigurator.PortalDomain}";
     return Results.Json(new
     {
         domain = portalConfigurator.PortalDomain,
@@ -1902,7 +1940,7 @@ portal.MapGet("/landing", async (HttpContext ctx, CancellationToken ct) =>
         {
             a.Id, a.Subdomain, a.Name, a.Icon, a.Category, Auth = a.Auth.ToString(),
             Autoscale = a.Autoscale.ToString(), a.TargetPort, a.ContainerName, a.ExternalUrl,
-            a.SortOrder, a.Hidden, a.Manual, a.AutoDiscovered, url = UrlFor(a)
+            a.SortOrder, a.Hidden, a.Manual, a.AutoDiscovered, self = PortalSelf.IsSelf(a), url = UrlFor(a)
         })
     });
 }).AllowAnonymous();
@@ -3086,7 +3124,7 @@ internal static class EhAgent
         return "# File: agent-compose.yml\n" +
                "services:\n" +
                $"  {name}:\n" +
-               "    image: eh-dockmanager:latest\n" +
+               "    image: ehudhazan/dockmanager:latest\n" +
                $"    container_name: {name}\n" +
                "    restart: unless-stopped\n" +
                "    command: [\"/app/eh-dockmanager\", \"--agent\", \"--port\", \"" + port + "\",\n" +

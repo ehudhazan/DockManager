@@ -4,7 +4,7 @@ title: UI & UX conventions
 description: The design system, navigation model, and mobile behaviour of the eh.DockManager React client, including the icon set, info tooltips, clickable surfaces, and role-based views.
 tags: [ui, ux, frontend, react, design-system, mobile]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T11:04:22Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:41:24Z }
 sources:
   - id: client-src
     resource: ../../src/eh.DockManager.Client/src
@@ -85,9 +85,12 @@ mobile. This concept records the conventions so later changes stay consistent.[^
   tiles plus a sortable per-container table (CPU / memory / network / ports / size) and one panel
   per Docker host, all from a single `GET /api/system/dashboard` call; see
   [Dashboard metrics & aggregation](/project/dashboard.md).
-* **Portal visibility & order.** Hidden apps show dimmed with a `hidden` badge, a **Show hidden**
-  toggle reveals them, and each card has hide/unhide and move-earlier/move-later controls; see
-  [Portal visibility & ordering](/project/portal.md).
+* **Portal visibility, order, delete & bulk add.** Hidden apps show dimmed with a `hidden` badge, a
+  **Show hidden** toggle reveals them, and each card has hide/unhide, move-earlier/move-later and a
+  two-step **Delete** control (omitted on DockManager's own entry). The **Add available** button opens a dialog that loads one connected
+  Docker host's containers or a Kubernetes cluster's public Services/Ingresses/HTTPRoutes with
+  search, multi-select and per-item inline editing (name, subdomain, category, target, access,
+  scale-to-zero); see [Portal visibility & ordering](/project/portal.md).
 * **Containers at a glance.** The container table and cards show published/exposed ports, relative
   creation age and writable-layer size (`size=1` on the Docker list) alongside state and actions.
 * **Kubernetes namespaces.** The namespace field is a picker populated from
@@ -219,6 +222,7 @@ Mobile invariants, checked at 390×844 on the live portal:
 * [Dashboard metrics & aggregation](/project/dashboard.md) — the numbers behind the Dashboard tiles and panels.
 * [Portal visibility & ordering](/project/portal.md) — hiding, revealing and sorting portal apps.
 * [MCP server permissions & audit](/project/mcp.md) — the Security view's MCP key editor.
+* [Operation guards across UI, MCP and server](/project/operation-guards.md) — why a blocked action is hidden here and also refused by REST and MCP.
 * [Network metrics & traffic history](/project/network-metrics.md) — the charts behind the traffic panels.
 * [Client/server version negotiation & asset freshness](/project/client-server-versioning.md) — the disconnect banner and redeploy reload.
 * [Stack YAML editor](/project/stack-yaml-editor.md) — validation, completions and smart indentation in the Stacks view.

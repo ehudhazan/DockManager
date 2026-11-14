@@ -4,7 +4,7 @@ title: UI & UX conventions
 description: The design system, navigation model, and mobile behaviour of the eh.DockManager React client, including the icon set, info tooltips, clickable surfaces, and role-based views.
 tags: [ui, ux, frontend, react, design-system, mobile]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T23:58:02Z }
 sources:
   - id: client-src
     resource: ../../src/eh.DockManager.Client/src
@@ -38,9 +38,17 @@ mobile. This concept records the conventions so later changes stay consistent.[^
 * **No emoji in chrome.** All navigation and actions use `Icon`; a colour + icon conveys state.
 * **Every page explains itself.** Each view starts with a `PageHeader` carrying a one-line
   subtitle and an `InfoTip`; complex sections use `Section` with `info`.
-* **Info affordance (`i`).** `InfoTip` renders a small `i` button: it opens on hover (desktop)
-  and on tap (touch), closes on outside-pointer or `Escape`, and is never nested inside another
-  button (for tiles, the tip is an absolutely-positioned sibling of the clickable element).
+* **Info affordance (`i`).** `InfoTip` renders a small `i` button: it opens on tap and on hover —
+  hover only when the pointer reports `hover: hover`, because a touch tap also synthesises
+  `mouseenter` and would leave the balloon stuck open — closes on outside-pointer or `Escape`, and
+  is never nested inside another button. The balloon is rendered through a **portal on
+  `document.body`** as a `position: fixed` box placed from the trigger's viewport rect: clamped
+  horizontally to the viewport (8 px margin), flipped above the trigger when it would run off the
+  bottom edge, re-placed on resize or any scroll, and painted at `z-[65]` so it sits above the
+  bottom sheet (`z-50`) and dialogs (`z-[60]`) but below the toast (`z-[70]`). Escaping to `body`
+  does the real work: a balloon left in place enlarged the nearest scroll container (the blank
+  side-scroll on a phone), and inside a card its `backdrop-filter` made the card the containing
+  block for a fixed descendant, so it was measured against the card instead of the viewport.
 * **Clickable surfaces.** Dashboard `StatTile`s navigate to the area they describe
   (Containers, Images, Proxy routes, Docker hosts, K8s clusters, Uptime/Settings); portal cards
   keep their Open / Terminal / Edit actions always visible instead of hover-only.
@@ -169,8 +177,29 @@ Tables switch to stacked cards below the `md` breakpoint, and the terminal drawe
 `MobileTouchBar`.
 
 Horizontal drift is prevented with `overflow-x: clip` on `body` (not `hidden`, which would create a
-scroll container and break the sticky header), so a stray absolutely-positioned element such as an
-info tooltip can no longer produce a blank side-scroll on a phone.
+scroll container and break the sticky header), and `main` carries `overflow-x: hidden` as the
+backstop inside the scroll area. Both are belt and braces: the old blank side-scroll came from a
+hidden info balloon parked off the right edge of `main`, which the portalled, viewport-clamped
+balloon no longer does.
+
+Mobile invariants, checked at 390×844 on the live portal:
+
+* **No side scroll** on any view, with every `Expand` disclosure open, and inside every dialog.
+  Only deliberate containers scroll sideways: table wrappers, tab strips, the terminal log block
+  and the terminal `MobileTouchBar`.
+* **Every balloon stays inside the viewport** — see the `i` affordance convention above.
+* **Section headers wrap instead of squeezing the title.** The `Section` title column keeps
+  `min-w-[10rem]` and the `h2` is `min-w-0 break-words`, so a wide actions row drops to its own
+  line and a long unbreakable title (a host name, say) breaks rather than pushing the info tip or a
+  badge out through the card edge.
+* **A grid or flex item that holds a badge or chip needs `min-w-0`**, with `truncate` on the
+  flexible text. Grid items default to `min-width: auto`, so a large `min-content` width pushes the
+  card past its track — the Dashboard **Provenance event feed** card used to be ~45 px wider than
+  the phone viewport and got clipped.
+* **Placeholders must fit the narrowest field.** The Portal search reads “Search apps…” and the
+  command palette reads “Type a command…”; the longer originals were clipped mid-word on a phone.
+* **The Portal card action row wraps** (`flex-wrap`), so with the card in a 3–4 column desktop grid
+  the icon buttons move to a second line instead of drawing outside the card.
 
 # Related
 

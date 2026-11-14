@@ -319,7 +319,11 @@ export default function App() {
 
         {serverDown && <ConnectionBanner version={serverVersion} />}
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-3 pb-24 pt-4 sm:px-5 sm:pb-28 md:pb-8">
+        {/* `overflow-x-hidden`: nothing in a view is meant to be wider than the viewport
+            (tables and tab strips carry their own scroll containers), so clip horizontally
+            here as a backstop — a stray wide or off-screen element must never turn the
+            scroll area into a horizontally swipeable one on a phone. */}
+        <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-24 pt-4 sm:px-5 sm:pb-28 md:pb-8">
           {view === 'portal' && <PortalLandingView notify={notify} openTerminal={openTerminal} isAdmin={isAdmin} />}
           {view === 'dashboard' && (
             <DashboardView
@@ -771,7 +775,7 @@ function CommandPalette({
           <input
             autoFocus
             className="w-full bg-transparent text-sm outline-none"
-            placeholder="Type a command — go to a view or run an action…"
+            placeholder="Type a command…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -1046,7 +1050,7 @@ function PortalLandingView({ notify, openTerminal, isAdmin }: { notify: Notify; 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-[14rem] flex-1">
           <Icon name="search" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input className="input pl-9" placeholder="Search apps by name, subdomain or category…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input className="input pl-9" placeholder="Search apps…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         <label className="flex items-center gap-2 text-xs text-slate-400">
           <input type="checkbox" checked={liveMetrics} onChange={(e) => setLiveMetrics(e.target.checked)} />
@@ -1256,7 +1260,9 @@ function PortalCard({
             </InfoTip>
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        {/* flex-wrap: with the card in a 3–4 column grid the action row is wider than the
+            card, so the icon buttons wrap to a second line instead of drawing outside it. */}
+        <div className="flex flex-wrap items-center gap-1.5">
           <button type="button" className="btn-primary flex-1 px-3 py-1.5 text-xs" onClick={onOpen}>
             <Icon name="externalLink" className="h-3.5 w-3.5" /> Open
           </button>
@@ -1834,6 +1840,7 @@ function DashboardView({
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Section
+          className="min-w-0"
           title="Provenance event feed"
           description="WebUI · MCP · Updater · CLI"
           info="Every action is stamped with the actor that performed it, so you can tell Web UI, MCP, auto-updater and external CLI changes apart."
@@ -1844,7 +1851,7 @@ function DashboardView({
                 <ActorBadge actor={event.actor} />
                 {event.actorDetail && (
                   <span
-                    className="max-w-[9rem] shrink-0 truncate rounded border border-ink-700 bg-ink-800/60 px-1.5 py-0.5 text-[10px] text-slate-400"
+                    className="max-w-[9rem] truncate rounded border border-ink-700 bg-ink-800/60 px-1.5 py-0.5 text-[10px] text-slate-400"
                     title={`${event.actor} · ${event.actorDetail}`}
                   >
                     {event.actorDetail}
@@ -1860,6 +1867,7 @@ function DashboardView({
         </Section>
 
         <Section
+          className="min-w-0"
           title="Vulnerability summary"
           description="Agentless CVE scan via OSV.dev"
           info="Reads the package database inside a running container and queries OSV.dev. No agent is installed."
@@ -3731,9 +3739,9 @@ function HostsView({ notify, refreshHosts }: { notify: Notify; refreshHosts: () 
             <Section
               key={host.id}
               title={
-                <span className="flex items-center gap-2">
-                  <Icon name={host.kind === 'UnixSocket' ? 'plug' : 'server'} className="h-4 w-4 text-slate-400" />
-                  {host.name}
+                <span className="flex min-w-0 items-center gap-2">
+                  <Icon name={host.kind === 'UnixSocket' ? 'plug' : 'server'} className="h-4 w-4 shrink-0 text-slate-400" />
+                  <span className="truncate" title={host.name}>{host.name}</span>
                   <span className="badge border border-transparent bg-ink-800 text-slate-300">{host.kind}</span>
                 </span>
               }

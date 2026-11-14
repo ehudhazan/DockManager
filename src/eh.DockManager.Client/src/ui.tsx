@@ -1,5 +1,6 @@
 // File: src/eh.DockManager.Client/src/ui.tsx
-import { cloneElement, isValidElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ReactElement, ReactNode } from 'react';
 import { Icon, type IconName } from './icons';
 import {
@@ -106,12 +107,61 @@ export function roleBlurb(role?: string): string {
 // ────────────────────────────────────────────────────────────────────────────
 export function InfoTip({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const ref = useRef<HTMLSpanElement | null>(null);
+  const tipRef = useRef<HTMLSpanElement | null>(null);
+  const shown = open || hovered;
+
+  // The balloon is rendered in a portal on `document.body` and positioned from the
+  // trigger's viewport rect. Two reasons:
+  //
+  //  1. It must never enlarge a scroll container. A balloon left in place near the right
+  //     edge of a phone made `main`'s scrollWidth exceed its width, so the phone could
+  //     swipe the view sideways — the "blank side-scroll". Escaping to `body` also escapes
+  //     the cards' `backdrop-filter`, which otherwise turns each card into the containing
+  //     block for a fixed descendant (so `fixed` was measured against the card, not the
+  //     viewport).
+  //  2. Measuring lets us clamp it inside the viewport instead of letting it spill past
+  //     an edge; when it would run off the bottom we flip it above the trigger.
+  const place = useCallback(() => {
+    const wrap = ref.current;
+    const tip = tipRef.current;
+    if (!wrap || !tip) return;
+    const anchor = wrap.getBoundingClientRect();
+    const width = tip.offsetWidth;
+    const height = tip.offsetHeight;
+    const margin = 8;
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const centered = anchor.left + anchor.width / 2 - width / 2;
+    const left = Math.max(margin, Math.min(centered, vw - width - margin));
+    let top = anchor.bottom + margin;
+    if (top + height > vh - margin) {
+      const above = anchor.top - margin - height;
+      top = above >= margin ? above : Math.max(margin, vh - height - margin);
+    }
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (shown) place();
+  }, [shown, place]);
+
+  useEffect(() => {
+    if (!shown) return undefined;
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [shown, place]);
 
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (event: PointerEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) setOpen(false);
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false);
@@ -125,7 +175,16 @@ export function InfoTip({ label, children, className }: { label: string; childre
   }, [open]);
 
   return (
-    <span ref={ref} className={classNames('group/tip relative inline-flex align-middle', className)}>
+    <span
+      ref={ref}
+      className={classNames('relative inline-flex align-middle', className)}
+      onMouseEnter={() => {
+        // Hover-open is for real pointers only: a touch tap also synthesises mouseenter,
+        // which would otherwise leave the balloon stuck open on a phone.
+        if (window.matchMedia('(hover: hover)').matches) setHovered(true);
+      }}
+      onMouseLeave={() => setHovered(false)}
+    >
       <button
         type="button"
         aria-label={`About ${label}`}
@@ -138,15 +197,21 @@ export function InfoTip({ label, children, className }: { label: string; childre
       >
         <Icon name="info" className="h-3.5 w-3.5" />
       </button>
-      <span
-        role="tooltip"
-        className={classNames(
-          'pointer-events-none absolute left-1/2 top-full z-50 mt-2 w-64 max-w-[78vw] -translate-x-1/2 rounded-xl border border-ink-700 bg-ink-850 p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-slate-300 shadow-2xl transition-opacity duration-150',
-          open ? 'visible opacity-100' : 'invisible opacity-0 group-hover/tip:visible group-hover/tip:opacity-100'
-        )}
-      >
-        {children}
-      </span>
+      {createPortal(
+        <span
+          ref={tipRef}
+          role="tooltip"
+          className={classNames(
+            // z-[65]: above every overlay (cards, bottom sheet and modals at z-50/z-60), below
+            // the toast (z-[70]) — a ball of text must never end up behind a dialog.
+            'pointer-events-none fixed z-[65] w-64 max-w-[78vw] rounded-xl border border-ink-700 bg-ink-850 p-3 text-left text-xs font-normal normal-case leading-relaxed tracking-normal text-slate-300 shadow-2xl transition-opacity duration-150',
+            shown ? 'visible opacity-100' : 'invisible opacity-0'
+          )}
+        >
+          {children}
+        </span>,
+        document.body
+      )}
     </span>
   );
 }
@@ -206,9 +271,12 @@ export function Section({
       {(title || actions) && (
         <div className="mb-3 flex flex-wrap items-start gap-2">
           {title && (
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <h2 className="text-sm font-semibold">{title}</h2>
+            // `min-w-[10rem]`: the title column must not be squeezed to a sliver by a wide
+            // actions row — the header row wraps instead, so the title, its info tip and any
+            // badges stay readable on a phone.
+            <div className="min-w-[10rem] flex-1">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <h2 className="min-w-0 break-words text-sm font-semibold">{title}</h2>
                 {info && <InfoTip label={typeof title === 'string' ? title : 'section'}>{info}</InfoTip>}
               </div>
               {description && <p className="mt-0.5 text-xs text-slate-400">{description}</p>}

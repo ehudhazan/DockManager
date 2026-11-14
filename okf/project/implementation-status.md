@@ -4,7 +4,7 @@ title: Delivered implementation
 description: What was actually built and verified for eh.DockManager, the generated file set, runtime behaviours exercised, and the deviations from PROMPT.md discovered during the build.
 tags: [status, implementation, build, deviations]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T21:05:00Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T23:58:02Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -275,6 +275,40 @@ A follow-up pass reworked the client and closed several runtime gaps; see
   `valid:false` with located issues, and `save_stack` denied with `-32003`. `dotnet build`,
   `npm run typecheck`, `npm run build`, `npm test` and `docker compose build` pass. No `verified` entry was
   added (self-run tests are not independent verification).
+
+# Eighth pass — mobile UI audit (balloons, side scroll, squeezed titles)
+
+Driven by the operator's request to walk every page, menu and info balloon on a phone and make sure
+the UI is correct: no balloon outside the viewport, no side scroll. Checked on the live portal at a
+390×844 mobile viewport (all ten views, every `Expand` disclosure open, thirteen dialogs, the bottom
+sheet, the command palette, the user menu, the terminal drawer and the sign-in screen).
+
+* **Info balloons all stayed inside the viewport** (was 38 of 51 outside). `InfoTip` now renders the
+  balloon through a portal on `document.body` as a `position: fixed` box placed from the trigger's
+  viewport rect — clamped horizontally, flipped above the trigger at the bottom edge, re-placed on
+  resize/scroll, `z-[65]`, and hover-open only for `hover: hover` pointers. A balloon left in place
+  enlarged `main`'s scroll area (the blank side-scroll) and, inside a `backdrop-blur` card, was
+  positioned against the card because `backdrop-filter` makes it a containing block for fixed
+  descendants.
+* **No side scroll anywhere**: `main` gained `overflow-x: hidden` as a backstop (the `body`
+  `overflow-x: clip` alone did not help, because the overflow lived inside `main`). The only
+  containers that scroll sideways are deliberate ones (table wrappers, tab strips, the terminal log
+  block and `MobileTouchBar`).
+* **Two cards drew outside the phone viewport and were fixed**: the Dashboard **Provenance event
+  feed** card (a grid item's `min-width: auto` let its 417 px `min-content` beat the 390 px track —
+  `min-w-0` on the grid children plus a shrinkable actor-detail chip) and the Hosts card, where a
+  wide actions row squeezed the title to ~119 px so the info tip landed on top of the kind badge
+  (`Section`'s title column now keeps `min-w-[10rem]`, the title row is `min-w-0`, the `h2` is
+  `min-w-0 break-words`, and the host name truncates).
+* **Placeholders clipped mid-word on a phone were shortened**: Portal search → “Search apps…”,
+  command palette → “Type a command…” (`portal` 292 px of text in 141 px of field).
+* **Desktop regression found while verifying**: the Portal card's action row drew outside the card in
+  a 3–4 column grid; the row now wraps. See [UI & UX conventions](/project/ui-ux.md) for the mobile
+  invariants.
+
+`npm run typecheck`, `npm run build`, `dotnet build` (0 errors) and `docker compose build` pass, and
+the deployed bundle's asset hash matches the local build (`index-DYHSMK9s.js`). No `verified` entry
+was added — a self-run audit is not independent verification.
 
 # Notes
 

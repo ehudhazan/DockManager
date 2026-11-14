@@ -4,7 +4,7 @@ title: Chrome DevTools MCP over an SSH reverse tunnel
 description: How OpenCode on the SSH host drives a Chrome window on the operator's Windows laptop — a reverse SSH tunnel exposes the laptop's CDP port as remote 127.0.0.1:9222 and chrome-devtools-mcp attaches to it with --browser-url.
 tags: [opencode, mcp, chrome, ssh, tunnel, remote-development, environment]
 status: draft
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:56:54Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T23:58:02Z }
 stale_after: 2027-05-13T00:00:00Z
 sources:
   - id: chrome-devtools-mcp
@@ -238,6 +238,27 @@ Anything beyond opening/activating tabs — screenshots, DOM reads, clicks — n
 WebSocket client (`Page.captureScreenshot`, `Runtime.evaluate`, …), which is what the MCP
 server normally wraps.
 
+## A minimal CDP client (what the MCP server wraps)
+
+Node 22 has a global `WebSocket`, so a ~40-line script does the job: `GET /json/version` for the
+browser `webSocketDebuggerUrl`, open a socket, `Target.getTargets` → `Target.attachToTarget`
+(`flatten: true`) for a page session, then send `{ id, method, params, sessionId }` and match
+responses by `id`. Two details matter for UI work on a phone-sized viewport:
+
+* `Emulation.setDeviceMetricsOverride` (`{ width: 390, height: 844, deviceScaleFactor: 3,
+  mobile: true }`) plus `Emulation.setTouchEmulationEnabled` gives a real mobile layout
+  (`innerWidth` 390, the page's `viewport` meta honoured); `Page.captureScreenshot` then returns a
+  3× image. Overrides are **session-scoped**: each new attach must re-apply them.
+* **Force a hard reload after a deploy.** Re-navigating a tab to the same URL (same hash) is a
+  same-document navigation, so it keeps running the *old* bundle; a session was once reading
+  `assets/index-Dwqm4EfV.js` while the server was already serving `index-BrwxWEMV.js`, which made
+  fixes look unapplied. `Page.reload` with `ignoreCache: true` (or a changed hash) is the cure —
+  compare `document.querySelector('script[src]').src` with the current `index.html`.
+* **Find balloons where they are rendered.** After the info tooltips moved into a portal on
+  `document.body`, `trigger.parentElement.querySelector('[role=tooltip]')` returns nothing; select
+  the visible `[role="tooltip"]` in the body instead, and close any still-open one (an `Escape`
+  keydown) before each measurement, or a stale balloon is measured instead of the current one.
+
 # Security
 
 CDP on port 9222 grants full control of the browser — cookies, logged-in sessions, page
@@ -263,7 +284,10 @@ content. Keep both ends on loopback:
 exercised from this session: `http://127.0.0.1:9222/json/version` returned `Chrome/157`, and
 `PUT /json/new` opened—and `/json/activate` focused—the DockManager portal. The MCP-server
 path itself was not exercised through an agent tool call, because the `chrome-devtools` tools
-were not exposed to the session (see above). The concept is therefore `status: draft` and
+were not exposed to the session (see above). The direct-CDP route was later used for a full
+mobile audit of the client (mobile device-metrics emulation, per-view DOM scans, screenshots and
+dispatch of clicks at element centres), so that path is exercised well beyond opening tabs; it was
+written up as a throwaway Node script in `/tmp/opencode`, not committed to the repository. The concept is therefore `status: draft` and
 carries no `verified` entry. Machine-confirmed here: the config is accepted by OpenCode (the
 server spawns and its tools register), the no-tunnel failure is `ECONNREFUSED` on
 `127.0.0.1:9222`, and the direct-CDP route works. Re-check after a Chrome,

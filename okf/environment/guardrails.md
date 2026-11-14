@@ -4,7 +4,7 @@ title: Agent environment guardrails
 description: Tool output shown to agents is sanitized by PII and secret-key redaction guardrails, so placeholder tokens replace sensitive spans while files on disk stay unchanged.
 tags: [guardrails, privacy, security, redaction, workflow]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T09:12:50Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-13T23:58:02Z }
 sources:
   - id: operator-briefing
     resource: OpenCode agent session — operator briefing and observed tool output
@@ -36,6 +36,7 @@ quotes the token in order to document it.
 | Effect | The matched span is replaced with a bracketed placeholder token (observed: `[ADDRESS]`) |
 | Scope | Display/transport only; the underlying files are never modified |
 | Stability | Not deterministic — the same span may or may not be redacted between calls, so placeholders are not stable identifiers |
+| Over-broad matches | It is **not** a precise secret detector: ordinary identifiers in code were redacted too (observed: the type name `Map`, a local variable `el`, `js`, `TOTP`, `ACME`, `dotnet`) |
 
 # Agent rules
 
@@ -51,6 +52,11 @@ quotes the token in order to document it.
 * **Confirm with counts, not previews.** To check whether a placeholder is literal file
   content, use a transformation that yields a non-textual answer (for example
   `grep -c -F '[ADDRESS]' <file>`) instead of eyeballing a preview that redaction may alter.
+* **Never rebuild text from a preview.** Because the match is over-broad (see *Behaviour*), a
+  preview can hide an ordinary identifier — a variable or type name in the code you just wrote.
+  Pasting that preview into an `edit`/`write` payload yields text that does not exist on disk (the
+  edit then fails with "could not find oldString", or worse, writes the marker). Re-read the bytes,
+  or have a script print character codes, whenever a match fails unexpectedly.
 
 # Related
 

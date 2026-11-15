@@ -4,7 +4,7 @@ title: Stack constraints
 description: Binding dependency, build, container, port, and storage constraints for eh.DockManager, including the audited NuGet allowlist and banned packages.
 tags: [constraints, dependencies, build, security]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T11:49:52Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T16:58:52Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -38,6 +38,7 @@ bearing and must not be removed:
 |---------|-----|
 | `<JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>` | Trimming disables reflection-based `System.Text.Json` by default; the control plane serializes dynamic payloads and throws at startup without this |
 | `<TrimmerRootAssembly Include="…" />` for `YamlDotNet`, `Fido2`, `Fido2.Models`, `Fido2.AspNet`, `ITfoxtec.Identity.Saml2`, `KubernetesClient`, `Microsoft.IdentityModel.Tokens.Saml`, `System.ServiceModel.Primitives`, `SQLitePCLRaw.batteries_v2`, `SQLitePCLRaw.core` | Keeps the reflection-driven libraries intact under `TrimMode=partial` |
+| `<TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />` | `SignedXml` resolves its digest/signature algorithms via `CryptoConfig` at run time; the descriptor preserves the `*Managed` hash shims and the RSA PKCS#1 formatters, without which SAML metadata / AuthnRequest signing throws `Could not create hash algorithm object` (see [SAML 2.0 SSO](/project/saml-sso.md) and dotnet/runtime#97274) |
 
 Trim analysis still emits IL2026/IL2104 warnings, and NuGet audit still flags the
 SDK-mandated `System.Security.Cryptography.Xml` `10.0.12`; both are warnings, not build
@@ -57,11 +58,23 @@ failures, and are accepted per the allowlist below.
   `mcr.microsoft.com/dotnet/runtime-deps:11.0-azurelinux3.0-distroless`) and can be
   overridden at build time with `--build-arg`.
 * Non-root user `$APP_UID` `64198` (`ENV APP_UID=64198`, `USER $APP_UID`).
-* **Published image:** `ehudhazan/dockmanager` (Docker Hub, `latest` by default).
-  `docker-compose.yml` sets `image: ehudhazan/dockmanager:latest` **and** keeps its `build:`
-  section, so `./build.sh` / `docker compose build` still builds from source and tags
-  `ehudhazan/dockmanager:latest`, while `docker compose pull` fetches the published tag. The
-  container and compose project keep the name `eh-dockmanager`.
+* **Published image:** `ehudhazan/dockmanager` (Docker Hub). `docker-compose.yml` sets
+  `image: ehudhazan/dockmanager:latest` **and** keeps its `build:` section, so `./build.sh`
+  builds from source and tags both `latest` and the date-based version, while
+  `docker compose pull` fetches the published `latest`. The container and compose project
+  keep the name `eh-dockmanager`.
+* **Publishing:** `./build.sh` is the release entry point. It builds from source, tags the
+  image **both** `latest` and the date-based version (`yyyy.M.d.<buildNumber>`), and pushes
+  **both** tags to Docker Hub. The registry is Docker Hub and the credentials live in the
+  operator's `~/.docker/config.json` (`docker login`); no push happens in CI or in the
+  Dockerfile. Pass `./build.sh --no-push` to build and tag locally without publishing. The
+  version tag pins the exact release; `latest` is the moving convenience tag. Last
+  successful push: `2026-11-14T13:35Z` via `./build.sh`, which pushed both `latest` and
+  `2026.11.14.10` (git commit count 10) with digest
+  `sha256:a2cf4769eb950f6a35f6eb36138e36a0e4e828230f98c3975b823bd71f0c45ae`. Always publish
+  through `./build.sh`, so the pushed layer carries the git-commit-count build number; a
+  plain `docker compose build` leaves `BUILD_NUMBER` empty, stamps a clock fallback, and
+  does not push.
 * Hardened compose flags: `--read-only`, `--cap-drop=ALL`,
   `--security-opt=no-new-privileges:true`.[^prompt-md]
 
@@ -137,7 +150,7 @@ build-time `HHmm` fallback. `docker-compose.yml` passes `BUILD_NUMBER: ${BUILD_N
 | Compose stacks | `/data/stacks/{stackName}/compose.yaml` and `.env` on disk (so manual `docker compose` stays compatible) |
 | Database | `/data/dockmanager.db` (SQLite, WAL mode) |
 | Vault key | `/data/.master.key` (AES-GCM 256-bit, `0600`); secrets referenced as `${VAULT:SECRET_NAME}` and injected in memory only |
-| PKI | `/data/certs/ca.pfx`, `/data/certs/ca.crt`, `/data/certs/tls.pfx`; ECDSA P-384 root CA, ECDSA P-256 leaf with hot-swapped certificate selector |
+| PKI | `/data/certs/ca.pfx`, `/data/certs/ca.crt`, `/data/certs/tls.pfx`; ECDSA P-384 root CA, ECDSA P-256 leaf with hot-swapped certificate selector. Separate self-signed SAML signing certificates: `/data/certs/sp-signing.pfx` and `/data/certs/idp-signing.pfx` (see [SAML 2.0 SSO](/project/saml-sso.md)) |
 
 Listen ports are read from the environment, defaulting to the values above:
 `EHDM_HTTP_PORT` (80), `EHDM_PORTAL_PORT` (443), `EHDM_ADMIN_PORT` (8443); this lets the

@@ -25,7 +25,6 @@ import {
   classNames,
   Expand,
   MetricRow,
-  MiniMetric,
   RefreshControl,
   TrafficChart,
   counterRate,
@@ -561,24 +560,29 @@ function Sidebar({ view, setView, nav, session, appVersion }: { view: ViewKey; s
         })}
       </nav>
 
-      <div className="mt-3 flex items-center gap-2 rounded-xl border border-ink-800 bg-ink-900/60 p-2.5">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-ink-700 bg-ink-850 text-slate-300">
-          <Icon name="user" className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xs font-medium text-slate-200">{session.username}</div>
-          <RoleBadge role={session.role} />
+      <div className="mt-3 overflow-hidden rounded-xl border border-ink-800 bg-ink-900/60">
+        <div className="flex items-center gap-2 p-2.5">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-ink-700 bg-ink-850 text-slate-300">
+            <Icon name="user" className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="min-w-0 truncate text-xs font-medium text-slate-200">{session.username}</span>
+              <span className="shrink-0">
+                <RoleBadge role={session.role} withLabel={false} />
+              </span>
+            </div>
+          </div>
         </div>
+        {appVersion && (
+          <div
+            className="border-t border-ink-800 px-2.5 py-1.5 text-center font-mono text-[10px] text-slate-400"
+            title={`Application version (build): ${appVersion}`}
+          >
+            v{appVersion}
+          </div>
+        )}
       </div>
-
-      {appVersion && (
-        <div
-          className="mt-2 truncate px-1 text-center font-mono text-[10px] text-slate-400"
-          title={`Application version (build): ${appVersion}`}
-        >
-          v{appVersion}
-        </div>
-      )}
     </aside>
   );
 }
@@ -1256,12 +1260,6 @@ function PortalCard({
 }) {
   const [cpu, setCpu] = useState<number[]>([]);
   const [ram, setRam] = useState<number[]>([]);
-  const [netIn, setNetIn] = useState<number[]>([]);
-  const [netOut, setNetOut] = useState<number[]>([]);
-  const [diskRead, setDiskRead] = useState<number[]>([]);
-  const [diskWrite, setDiskWrite] = useState<number[]>([]);
-  const [latest, setLatest] = useState<MetricSample | null>(null);
-  const previous = useRef<MetricSample | null>(null);
 
   useEffect(() => {
     if (!live || !app.containerName) return undefined;
@@ -1270,26 +1268,14 @@ function PortalCard({
       try {
         const sample = JSON.parse(event.data) as MetricSample & { error?: string };
         if (sample.error) return;
-        const prev = previous.current;
-        previous.current = sample;
-        const seconds = prev
-          ? Math.max(1, (new Date(sample.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 1000)
-          : 0;
-        setLatest(sample);
         setCpu((p) => [...p, sample.cpuPercent ?? 0].slice(-30));
         setRam((p) => [...p, sample.memoryMb ?? 0].slice(-30));
-        setNetIn((p) => [...p, counterRate(prev?.networkRxBytes, sample.networkRxBytes ?? 0, seconds)].slice(-30));
-        setNetOut((p) => [...p, counterRate(prev?.networkTxBytes, sample.networkTxBytes ?? 0, seconds)].slice(-30));
-        setDiskRead((p) => [...p, counterRate(prev?.blockReadBytes, sample.blockReadBytes ?? 0, seconds)].slice(-30));
-        setDiskWrite((p) => [...p, counterRate(prev?.blockWriteBytes, sample.blockWriteBytes ?? 0, seconds)].slice(-30));
       } catch {
         /* ignore malformed frames */
       }
     };
     return () => source.close();
   }, [live, app.containerName]);
-
-  const last = (series: number[]) => series[series.length - 1] ?? 0;
 
   const accessLabel = app.auth === 'Public' ? 'anyone' : app.auth === 'Sso' ? 'signed-in users' : 'admins only';
 
@@ -1330,14 +1316,6 @@ function PortalCard({
 
       <div className="mt-auto space-y-2">
         <Expand title="More info" hint={app.auth === 'Public' ? 'public' : app.auth === 'Sso' ? 'signed-in' : 'admins'}>
-          {live && app.containerName && (
-            <div className="mb-2 grid grid-cols-2 gap-2">
-              <MiniMetric label="Network in" value={formatRate(last(netIn))} data={netIn} stroke="#38bdf8" />
-              <MiniMetric label="Network out" value={formatRate(last(netOut))} data={netOut} stroke="#22d3ee" />
-              <MiniMetric label="Disk read" value={formatRate(last(diskRead))} data={diskRead} stroke="#f59e0b" />
-              <MiniMetric label="Disk write" value={formatRate(last(diskWrite))} data={diskWrite} stroke="#f472b6" />
-            </div>
-          )}
           <MetricRow label="Name" value={app.name} />
           <MetricRow label="Address" value={<span className="font-mono text-[11px]">{app.subdomain}</span>} />
           <MetricRow label="Category" value={app.category} />
@@ -1348,16 +1326,10 @@ function PortalCard({
           {app.externalUrl && <MetricRow label="External URL" value={<span className="font-mono text-[11px]">{app.externalUrl}</span>} />}
           <MetricRow label="Discovered" value={app.autoDiscovered ? 'automatically' : 'manually added'} />
           {app.hidden && <MetricRow label="Visibility" value="hidden from the portal" />}
-          {latest && (
-            <>
-              <MetricRow label="Processes / threads" value={formatNumber(latest.pidsCurrent)} hint={latest.pidsLimit > 0 ? `limit ${formatNumber(latest.pidsLimit)}` : undefined} />
-              <MetricRow label="CPU cores" value={formatNumber(latest.cpuCores)} />
-              <MetricRow label="Memory peak" value={formatBytes(latest.memoryPeakMb * 1024 * 1024)} />
-              <MetricRow label="Disk read total" value={formatBytes(latest.blockReadBytes)} />
-              <MetricRow label="Disk written total" value={formatBytes(latest.blockWriteBytes)} />
-              <MetricRow label="Network in / out" value={`${formatBytes(latest.networkRxBytes)} / ${formatBytes(latest.networkTxBytes)}`} />
-              <MetricRow label="Packets in / out" value={`${formatNumber(latest.networkRxPackets)} / ${formatNumber(latest.networkTxPackets)}`} />
-            </>
+          {live && app.containerName && (
+            <div className="mt-3">
+              <ContainerStatsPanel id={app.containerName} />
+            </div>
           )}
         </Expand>
         <div className="flex min-w-0 items-center gap-2">
@@ -2119,7 +2091,7 @@ function DashboardView({
                   {expandedContainer === container.id && (
                     <tr className="bg-ink-900/40">
                       <td colSpan={7} className="px-3 py-3">
-                        <ContainerMetricGrid container={container} />
+                        <ContainerStatsPanel id={container.id} hostId={activeHost} ports={container.ports} created={container.created} sizeRwBytes={container.sizeRwBytes} />
                       </td>
                     </tr>
                   )}
@@ -2150,8 +2122,8 @@ function DashboardView({
                 <span>Size <span className="text-slate-200">{formatBytes(container.sizeRwBytes)}</span></span>
               </div>
               <div className="mt-2">
-                <Expand title="More stats" hint="CPU, memory, IO, network">
-                  <ContainerMetricGrid container={container} />
+                <Expand title="More info" hint="CPU, memory, IO, network">
+                  <ContainerStatsPanel id={container.id} hostId={activeHost} ports={container.ports} created={container.created} sizeRwBytes={container.sizeRwBytes} />
                 </Expand>
               </div>
               {container.ports.length > 0 && (
@@ -2425,64 +2397,6 @@ function NetworkSection({ network, onConfigure }: { network?: NetworkSummary; on
         </div>
       )}
     </Section>
-  );
-}
-
-/** Dense, human-labelled metric grid for one container (CPU, memory, PIDs, IO, network). */
-function ContainerMetricGrid({ container }: { container: DashboardContainerInfo }) {
-  const netIssues = container.networkRxErrors + container.networkTxErrors
-    + container.networkRxDropped + container.networkTxDropped;
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">CPU</div>
-        <MetricRow label="Usage" value={formatPercent(container.cpuPercent)} hint={`of ${container.cpuCores} cores`} />
-        <MetricRow label="Throttled periods" value={formatNumber(container.cpuThrottledPeriods)} />
-        <MetricRow label="Throttled time" value={`${formatNumber(container.cpuThrottledMs, 1)} ms`} />
-      </div>
-      <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Memory</div>
-        <MetricRow label="Used" value={formatBytes(container.memoryMb * 1024 * 1024)} />
-        <MetricRow label="Limit" value={container.memoryLimitMb > 0 ? formatBytes(container.memoryLimitMb * 1024 * 1024) : 'unlimited'} />
-        <MetricRow label="Peak" value={formatBytes(container.memoryPeakMb * 1024 * 1024)} />
-        <MetricRow label="Allocation failures" value={formatNumber(container.memoryFailCount)} />
-      </div>
-      <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Processes &amp; disk</div>
-        <MetricRow label="Processes / threads (PIDs)" value={formatNumber(container.pidsCurrent)} hint={container.pidsLimit > 0 ? `limit ${formatNumber(container.pidsLimit)}` : undefined} />
-        <MetricRow label="Block read" value={formatBytes(container.blockReadBytes)} />
-        <MetricRow label="Block written" value={formatBytes(container.blockWriteBytes)} />
-        <MetricRow label="Writable layer" value={formatBytes(container.sizeRwBytes)} />
-      </div>
-      <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Network</div>
-        <MetricRow label="Received" value={formatBytes(container.networkRxBytes)} />
-        <MetricRow label="Sent" value={formatBytes(container.networkTxBytes)} />
-        <MetricRow label="Packets in / out" value={`${formatNumber(container.networkRxPackets)} / ${formatNumber(container.networkTxPackets)}`} />
-      </div>
-      <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Network issues</div>
-        <MetricRow label="Receive errors" value={formatNumber(container.networkRxErrors)} />
-        <MetricRow label="Transmit errors" value={formatNumber(container.networkTxErrors)} />
-        <MetricRow label="Receive / transmit drops" value={`${formatNumber(container.networkRxDropped)} / ${formatNumber(container.networkTxDropped)}`} />
-        <MetricRow label="Total issues" value={formatNumber(netIssues)} />
-      </div>
-      <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Ports &amp; age</div>
-        <MetricRow label="Created" value={container.created ? formatRelative(container.created) : 'unknown'} />
-        <MetricRow
-          label="Ports"
-          value={container.ports.length === 0 ? 'none' : ''}
-        />
-        {container.ports.length > 0 && (
-          <div className="flex flex-wrap gap-1 pt-1">
-            {container.ports.map((port) => (
-              <span key={port} className="badge border border-ink-700 bg-ink-800/60 font-mono text-[10px] normal-case text-slate-300">{port}</span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }
 
@@ -2987,6 +2901,7 @@ function ContainersView({
   const [containers, setContainers] = useState<DockerContainerSummary[]>([]);
   const [query, setQuery] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [refresh, setRefresh] = usePersistentState<number>('ehdm.refresh.containers', 5);
 
   const load = useCallback(() => {
@@ -3062,23 +2977,44 @@ function ContainersView({
           </thead>
           <tbody>
             {filtered.map((container) => (
-              <tr key={container.Id} className="table-row">
-                <td className="px-3 py-2 font-medium">{containerName(container)}</td>
-                <td className="px-3 py-2 text-slate-400">{container.Image}</td>
-                <td className="px-3 py-2"><StatusPill status={container.State} /></td>
-                <td className="px-3 py-2 text-xs text-slate-400">{container.Status}</td>
-                <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {containerPorts(container).length === 0 && <span className="text-xs text-slate-400">—</span>}
-                    {containerPorts(container).map((port) => (
-                      <span key={port} className="badge border border-ink-700 bg-ink-800/60 font-mono text-[10px] normal-case text-slate-300">{port}</span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-3 py-2 text-xs text-slate-400">{container.Created ? formatRelative(container.Created) : '—'}</td>
-                <td className="px-3 py-2 text-right text-xs tabular-nums text-slate-400">{container.SizeRw != null ? formatBytes(container.SizeRw) : '—'}</td>
-                <td className="px-3 py-2">{actions(container, false)}</td>
-              </tr>
+              <Fragment key={container.Id}>
+                <tr className="table-row">
+                  <td className="px-3 py-2 font-medium">
+                    <div className="flex items-start gap-1.5">
+                      <button
+                        type="button"
+                        className="mt-0.5 shrink-0 text-slate-400 hover:text-accent"
+                        aria-label={expanded === container.Id ? 'Hide container details' : 'Show container details'}
+                        onClick={() => setExpanded(expanded === container.Id ? null : container.Id)}
+                      >
+                        <Icon name={expanded === container.Id ? 'chevronDown' : 'chevronRight'} className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="min-w-0 truncate">{containerName(container)}</span>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-slate-400">{container.Image}</td>
+                  <td className="px-3 py-2"><StatusPill status={container.State} /></td>
+                  <td className="px-3 py-2 text-xs text-slate-400">{container.Status}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-1">
+                      {containerPorts(container).length === 0 && <span className="text-xs text-slate-400">—</span>}
+                      {containerPorts(container).map((port) => (
+                        <span key={port} className="badge border border-ink-700 bg-ink-800/60 font-mono text-[10px] normal-case text-slate-300">{port}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-slate-400">{container.Created ? formatRelative(container.Created) : '—'}</td>
+                  <td className="px-3 py-2 text-right text-xs tabular-nums text-slate-400">{container.SizeRw != null ? formatBytes(container.SizeRw) : '—'}</td>
+                  <td className="px-3 py-2">{actions(container, false)}</td>
+                </tr>
+                {expanded === container.Id && (
+                  <tr className="bg-ink-900/40">
+                    <td colSpan={8} className="px-3 py-3">
+                      <ContainerStatsPanel id={container.Id} hostId={activeHost} ports={containerPorts(container)} created={container.Created} sizeRwBytes={container.SizeRw} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
             {filtered.length === 0 && (
               <tr><td colSpan={8} className="px-3 py-8 text-center text-slate-400">No containers match.</td></tr>
@@ -3109,11 +3045,256 @@ function ContainersView({
                 ))}
               </div>
             )}
+            <Expand title="More info" hint="counters &amp; charts">
+              <ContainerStatsPanel id={container.Id} hostId={activeHost} ports={containerPorts(container)} created={container.Created} sizeRwBytes={container.SizeRw} />
+            </Expand>
             {actions(container, true)}
           </div>
         ))}
         {filtered.length === 0 && <EmptyState icon="box" title="No containers match" />}
       </div>
+    </div>
+  );
+}
+
+/** CPU/memory/network/disk counters for a container, from one extended `/metrics` sample. */
+function ContainerCounterCards({
+  metric,
+  ports,
+  created,
+  sizeRwBytes,
+  compact
+}: {
+  metric: ExtendedContainerMetric;
+  ports?: string[];
+  created?: string | number;
+  sizeRwBytes?: number;
+  compact?: boolean;
+}) {
+  const netIssues = metric.networkRxErrors + metric.networkTxErrors
+    + metric.networkRxDropped + metric.networkTxDropped;
+  if (compact) {
+    return (
+      <div className="space-y-1">
+        <MetricRow label="CPU usage" value={formatPercent(metric.cpuPercent)} hint={`of ${metric.cpuCores} cores`} />
+        <MetricRow label="CPU throttled" value={`${formatNumber(metric.cpuThrottledPeriods)} periods · ${formatNumber(metric.cpuThrottledMs, 1)} ms`} />
+        <MetricRow label="Memory limit" value={metric.memoryLimitMb > 0 ? formatBytes(metric.memoryLimitMb * 1024 * 1024) : 'unlimited'} />
+        <MetricRow label="Memory peak" value={formatBytes(metric.memoryPeakMb * 1024 * 1024)} />
+        <MetricRow label="Allocation failures" value={formatNumber(metric.memoryFailCount)} />
+        <MetricRow label="Processes / threads" value={formatNumber(metric.pidsCurrent)} hint={metric.pidsLimit > 0 ? `limit ${formatNumber(metric.pidsLimit)}` : undefined} />
+        <MetricRow label="Block read / written" value={`${formatBytes(metric.blockReadBytes)} / ${formatBytes(metric.blockWriteBytes)}`} />
+        <MetricRow label="Network in / out" value={`${formatBytes(metric.networkRxBytes)} / ${formatBytes(metric.networkTxBytes)}`} />
+        <MetricRow label="Packets in / out" value={`${formatNumber(metric.networkRxPackets)} / ${formatNumber(metric.networkTxPackets)}`} />
+        <MetricRow label="Network errors / drops" value={`${formatNumber(metric.networkRxErrors + metric.networkTxErrors)} / ${formatNumber(metric.networkRxDropped + metric.networkTxDropped)}`} />
+      </div>
+    );
+  }
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="card p-3">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">CPU</div>
+        <MetricRow label="Usage" value={formatPercent(metric.cpuPercent)} hint={`of ${metric.cpuCores} cores`} />
+        <MetricRow label="Throttled periods" value={formatNumber(metric.cpuThrottledPeriods)} />
+        <MetricRow label="Throttled time" value={`${formatNumber(metric.cpuThrottledMs, 1)} ms`} />
+      </div>
+      <div className="card p-3">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Memory</div>
+        <MetricRow label="Used" value={formatBytes(metric.memoryMb * 1024 * 1024)} />
+        <MetricRow label="Limit" value={metric.memoryLimitMb > 0 ? formatBytes(metric.memoryLimitMb * 1024 * 1024) : 'unlimited'} />
+        <MetricRow label="Peak" value={formatBytes(metric.memoryPeakMb * 1024 * 1024)} />
+        <MetricRow label="Allocation failures" value={formatNumber(metric.memoryFailCount)} />
+      </div>
+      <div className="card p-3">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Processes &amp; disk</div>
+        <MetricRow label="Processes / threads (PIDs)" value={formatNumber(metric.pidsCurrent)} hint={metric.pidsLimit > 0 ? `limit ${formatNumber(metric.pidsLimit)}` : undefined} />
+        <MetricRow label="Block read" value={formatBytes(metric.blockReadBytes)} />
+        <MetricRow label="Block written" value={formatBytes(metric.blockWriteBytes)} />
+        {sizeRwBytes != null && <MetricRow label="Writable layer" value={formatBytes(sizeRwBytes)} />}
+      </div>
+      <div className="card p-3">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Network</div>
+        <MetricRow label="Received" value={formatBytes(metric.networkRxBytes)} />
+        <MetricRow label="Sent" value={formatBytes(metric.networkTxBytes)} />
+        <MetricRow label="Packets in / out" value={`${formatNumber(metric.networkRxPackets)} / ${formatNumber(metric.networkTxPackets)}`} />
+      </div>
+      <div className="card p-3">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Network issues</div>
+        <MetricRow label="Receive errors" value={formatNumber(metric.networkRxErrors)} />
+        <MetricRow label="Transmit errors" value={formatNumber(metric.networkTxErrors)} />
+        <MetricRow label="Receive / transmit drops" value={`${formatNumber(metric.networkRxDropped)} / ${formatNumber(metric.networkTxDropped)}`} />
+        <MetricRow label="Total issues" value={formatNumber(netIssues)} />
+      </div>
+      <div className="card p-3">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Ports &amp; age</div>
+        {created && <MetricRow label="Created" value={formatRelative(created)} />}
+        <MetricRow label="Ports" value={ports && ports.length > 0 ? '' : 'none'} />
+        {ports && ports.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {ports.map((port) => (
+              <span key={port} className="badge border border-ink-700 bg-ink-800/60 font-mono text-[10px] normal-case text-slate-300">{port}</span>
+            ))}
+          </div>
+        )}
+      </div>
+      {metric.interfaces.length > 0 && (
+        <div className="sm:col-span-2 lg:col-span-3">
+          <Expand title={`Interfaces (${metric.interfaces.length})`} hint="per Docker network">
+            {metric.interfaces.map((iface) => (
+              <div key={iface.name} className="border-b border-ink-800/50 py-1 text-xs last:border-b-0">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-slate-300">{iface.name}</span>
+                  <span className="tabular-nums text-slate-400">↓ {formatBytes(iface.rxBytes)} · ↑ {formatBytes(iface.txBytes)}</span>
+                </div>
+              </div>
+            ))}
+          </Expand>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Polls one extended `/metrics` sample and renders the counter cards (mounts only when its disclosure is open). */
+function ContainerExtendedCounters({
+  id,
+  hostId,
+  ports,
+  created,
+  sizeRwBytes,
+  compact
+}: {
+  id: string;
+  hostId?: number;
+  ports?: string[];
+  created?: string | number;
+  sizeRwBytes?: number;
+  compact?: boolean;
+}) {
+  const [metric, setMetric] = useState<ExtendedContainerMetric | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchMetrics = () => {
+      api.containerMetrics(id, hostId)
+        .then((result) => { if (!cancelled) setMetric(result.stats ?? null); })
+        .catch(() => undefined);
+    };
+    fetchMetrics();
+    const timer = window.setInterval(fetchMetrics, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [id, hostId]);
+  if (!metric) return <div className="text-xs text-slate-400">Loading counters…</div>;
+  return <ContainerCounterCards metric={metric} ports={ports} created={created} sizeRwBytes={sizeRwBytes} compact={compact} />;
+}
+
+/**
+ * The shared live container panel: a 2 s stats stream feeds CPU/memory/network/disk
+ * charts, a 5 s `/metrics` poll feeds the counters. Used by the Containers view, the
+ * Dashboard container row and the Container Inspector so every surface matches.
+ */
+function ContainerStatsPanel({
+  id,
+  hostId,
+  ports,
+  created,
+  sizeRwBytes
+}: {
+  id: string;
+  hostId?: number;
+  ports?: string[];
+  created?: string | number;
+  sizeRwBytes?: number;
+}) {
+  const [cpu, setCpu] = useState<number[]>([]);
+  const [ram, setRam] = useState<number[]>([]);
+  const [netIn, setNetIn] = useState<number[]>([]);
+  const [netOut, setNetOut] = useState<number[]>([]);
+  const [ioRead, setIoRead] = useState<number[]>([]);
+  const [ioWrite, setIoWrite] = useState<number[]>([]);
+  const [netHistory, setNetHistory] = useState<ContainerNetworkHistory | null>(null);
+  const previous = useRef<MetricSample | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchHistory = () => {
+      api.containerNetwork(id, hostId)
+        .then((history) => { if (!cancelled) setNetHistory(history); })
+        .catch(() => undefined);
+    };
+    fetchHistory();
+    const timer = window.setInterval(fetchHistory, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [id, hostId]);
+
+  useEffect(() => {
+    const source = new EventSource(api.statsUrl(id, hostId), { withCredentials: true });
+    source.onmessage = (event) => {
+      try {
+        const sample = JSON.parse(event.data) as MetricSample & { error?: string };
+        if (sample.error) return;
+        const prev = previous.current;
+        previous.current = sample;
+        const seconds = prev
+          ? Math.max(1, (new Date(sample.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 1000)
+          : 0;
+        setCpu((p) => [...p, sample.cpuPercent ?? 0].slice(-60));
+        setRam((p) => [...p, sample.memoryMb ?? 0].slice(-60));
+        setNetIn((p) => [...p, counterRate(prev?.networkRxBytes, sample.networkRxBytes ?? 0, seconds)].slice(-60));
+        setNetOut((p) => [...p, counterRate(prev?.networkTxBytes, sample.networkTxBytes ?? 0, seconds)].slice(-60));
+        setIoRead((p) => [...p, counterRate(prev?.blockReadBytes, sample.blockReadBytes ?? 0, seconds)].slice(-60));
+        setIoWrite((p) => [...p, counterRate(prev?.blockWriteBytes, sample.blockWriteBytes ?? 0, seconds)].slice(-60));
+      } catch {
+        /* ignore malformed frames */
+      }
+    };
+    return () => source.close();
+  }, [id, hostId]);
+
+  const last = (series: number[]) => series[series.length - 1] ?? 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="card p-3">
+          <div className="flex items-baseline justify-between text-xs text-slate-400"><span>CPU</span><span>{formatPercent(cpu[cpu.length - 1] ?? 0)}</span></div>
+          <Sparkline data={cpu} stroke="#38bdf8" height={70} />
+        </div>
+        <div className="card p-3">
+          <div className="flex items-baseline justify-between text-xs text-slate-400"><span>Memory</span><span>{formatBytes((ram[ram.length - 1] ?? 0) * 1024 * 1024)}</span></div>
+          <Sparkline data={ram} stroke="#34d399" height={70} />
+        </div>
+      </div>
+
+      <div className="card p-3">
+        <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+          <span>Network throughput</span>
+          <span>↓ {formatRate(last(netIn))} · ↑ {formatRate(last(netOut))}</span>
+        </div>
+        <TrafficChart inData={netIn} outData={netOut} />
+        {netHistory && netHistory.history.length > 0 && (
+          <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-slate-400">
+            <span>In 1h <span className="text-slate-200">{formatBytes(netHistory.rxLast1hBytes)}</span></span>
+            <span>Out 1h <span className="text-slate-200">{formatBytes(netHistory.txLast1hBytes)}</span></span>
+            <span>In 24h <span className="text-slate-200">{formatBytes(netHistory.rxLast24hBytes)}</span></span>
+            <span>Out 24h <span className="text-slate-200">{formatBytes(netHistory.txLast24hBytes)}</span></span>
+          </div>
+        )}
+      </div>
+
+      <div className="card p-3">
+        <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
+          <span>Disk throughput</span>
+          <span>read {formatRate(last(ioRead))} · write {formatRate(last(ioWrite))}</span>
+        </div>
+        <TrafficChart inData={ioRead} outData={ioWrite} inLabel="Read" outLabel="Write" />
+      </div>
+
+      <ContainerExtendedCounters id={id} hostId={hostId} ports={ports} created={created} sizeRwBytes={sizeRwBytes} />
     </div>
   );
 }
@@ -3131,64 +3312,13 @@ function ContainerInspector({
 }) {
   const [tab, setTab] = useState<'stats' | 'logs' | 'files'>('stats');
   const [shell, setShell] = useState('/bin/sh');
-  const [cpu, setCpu] = useState<number[]>([]);
-  const [ram, setRam] = useState<number[]>([]);
-  const [ioRead, setIoRead] = useState<number[]>([]);
-  const [ioWrite, setIoWrite] = useState<number[]>([]);
-  const previous = useRef<MetricSample | null>(null);
   const [logs, setLogs] = useState<{ stream: string; line: string }[]>([]);
   const [filter, setFilter] = useState('');
   const [path, setPath] = useState('/');
   const [entries, setEntries] = useState<TarEntryInfo[]>([]);
   const [cves, setCves] = useState<CveFinding[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [extended, setExtended] = useState<ExtendedContainerMetric | null>(null);
-  const [netHistory, setNetHistory] = useState<ContainerNetworkHistory | null>(null);
   const [logTimestamps, setLogTimestamps] = usePersistentState<boolean>('ehdm.logs.timestamps', true);
-
-  // Poll the one-shot extended metrics (throttle, pids, block IO, network) while Stats is open.
-  useEffect(() => {
-    if (tab !== 'stats') return undefined;
-    let cancelled = false;
-    const fetchMetrics = () => {
-      api.containerMetrics(id)
-        .then((result) => {
-          if (cancelled) return;
-          setExtended(result.stats ?? null);
-          setNetHistory(result.network);
-        })
-        .catch(() => undefined);
-    };
-    fetchMetrics();
-    const timer = window.setInterval(fetchMetrics, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [id, tab]);
-
-  useEffect(() => {
-    if (tab !== 'stats') return undefined;
-    const source = new EventSource(api.statsUrl(id), { withCredentials: true });
-    source.onmessage = (event) => {
-      try {
-        const sample = JSON.parse(event.data) as MetricSample & { error?: string };
-        if (sample.error) return;
-        const prev = previous.current;
-        previous.current = sample;
-        const seconds = prev
-          ? Math.max(1, (new Date(sample.timestamp).getTime() - new Date(prev.timestamp).getTime()) / 1000)
-          : 0;
-        setCpu((p) => [...p, sample.cpuPercent ?? 0].slice(-60));
-        setRam((p) => [...p, sample.memoryMb ?? 0].slice(-60));
-        setIoRead((p) => [...p, counterRate(prev?.blockReadBytes, sample.blockReadBytes ?? 0, seconds)].slice(-60));
-        setIoWrite((p) => [...p, counterRate(prev?.blockWriteBytes, sample.blockWriteBytes ?? 0, seconds)].slice(-60));
-      } catch {
-        /* ignore */
-      }
-    };
-    return () => source.close();
-  }, [id, tab]);
 
   useEffect(() => {
     if (tab !== 'logs') return undefined;
@@ -3257,89 +3387,7 @@ function ContainerInspector({
         <div className="flex-1 overflow-y-auto p-4">
           {tab === 'stats' && (
             <div className="space-y-4">
-              <div className="card p-3">
-                <div className="flex items-baseline justify-between text-xs text-slate-400"><span>CPU</span><span>{formatPercent(cpu[cpu.length - 1] ?? 0)}</span></div>
-                <Sparkline data={cpu} stroke="#38bdf8" height={70} />
-              </div>
-              <div className="card p-3">
-                <div className="flex items-baseline justify-between text-xs text-slate-400"><span>Memory</span><span>{formatBytes((ram[ram.length - 1] ?? 0) * 1024 * 1024)}</span></div>
-                <Sparkline data={ram} stroke="#34d399" height={70} />
-              </div>
-
-              <div className="card p-3">
-                <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
-                  <span>Network throughput</span>
-                  <span>
-                    ↓ {formatRate(netHistory?.history.at(-1)?.rxBytesPerSec ?? 0)} · ↑ {formatRate(netHistory?.history.at(-1)?.txBytesPerSec ?? 0)}
-                  </span>
-                </div>
-                <TrafficChart
-                  inData={(netHistory?.history ?? []).map((p) => p.rxBytesPerSec)}
-                  outData={(netHistory?.history ?? []).map((p) => p.txBytesPerSec)}
-                />
-                {netHistory && (
-                  <div className="mt-2 grid grid-cols-2 gap-1 text-[11px] text-slate-400">
-                    <span>In 1h <span className="text-slate-200">{formatBytes(netHistory.rxLast1hBytes)}</span></span>
-                    <span>Out 1h <span className="text-slate-200">{formatBytes(netHistory.txLast1hBytes)}</span></span>
-                    <span>In 24h <span className="text-slate-200">{formatBytes(netHistory.rxLast24hBytes)}</span></span>
-                    <span>Out 24h <span className="text-slate-200">{formatBytes(netHistory.txLast24hBytes)}</span></span>
-                  </div>
-                )}
-              </div>
-
-              <div className="card p-3">
-                <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
-                  <span>Disk throughput</span>
-                  <span>
-                    read {formatRate(ioRead[ioRead.length - 1] ?? 0)} · write {formatRate(ioWrite[ioWrite.length - 1] ?? 0)}
-                  </span>
-                </div>
-                <TrafficChart inData={ioRead} outData={ioWrite} inLabel="Read" outLabel="Write" />
-              </div>
-
-              {extended && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="card p-3">
-                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">CPU</div>
-                    <MetricRow label="Usage" value={formatPercent(extended.cpuPercent)} hint={`of ${extended.cpuCores} cores`} />
-                    <MetricRow label="Throttled periods" value={formatNumber(extended.cpuThrottledPeriods)} />
-                    <MetricRow label="Throttled time" value={`${formatNumber(extended.cpuThrottledMs, 1)} ms`} />
-                  </div>
-                  <div className="card p-3">
-                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Memory</div>
-                    <MetricRow label="Used" value={formatBytes(extended.memoryMb * 1024 * 1024)} />
-                    <MetricRow label="Limit" value={extended.memoryLimitMb > 0 ? formatBytes(extended.memoryLimitMb * 1024 * 1024) : 'unlimited'} />
-                    <MetricRow label="Peak" value={formatBytes(extended.memoryPeakMb * 1024 * 1024)} />
-                    <MetricRow label="Allocation failures" value={formatNumber(extended.memoryFailCount)} />
-                  </div>
-                  <div className="card p-3">
-                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Processes &amp; disk</div>
-                    <MetricRow label="Processes / threads (PIDs)" value={formatNumber(extended.pidsCurrent)} hint={extended.pidsLimit > 0 ? `limit ${formatNumber(extended.pidsLimit)}` : undefined} />
-                    <MetricRow label="Block read" value={formatBytes(extended.blockReadBytes)} />
-                    <MetricRow label="Block written" value={formatBytes(extended.blockWriteBytes)} />
-                  </div>
-                  <div className="card p-3">
-                    <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Network issues</div>
-                    <MetricRow label="Packets in / out" value={`${formatNumber(extended.networkRxPackets)} / ${formatNumber(extended.networkTxPackets)}`} />
-                    <MetricRow label="Receive errors" value={formatNumber(extended.networkRxErrors)} />
-                    <MetricRow label="Transmit errors" value={formatNumber(extended.networkTxErrors)} />
-                    <MetricRow label="Receive / transmit drops" value={`${formatNumber(extended.networkRxDropped)} / ${formatNumber(extended.networkTxDropped)}`} />
-                  </div>
-                </div>
-              )}
-
-              {extended && extended.interfaces.length > 0 && (
-                <Expand title={`Interfaces (${extended.interfaces.length})`}>
-                  {extended.interfaces.map((iface) => (
-                    <div key={iface.name} className="border-b border-ink-800/50 py-1 last:border-b-0 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-slate-300">{iface.name}</span>
-                        <span className="tabular-nums text-slate-400">↓ {formatBytes(iface.rxBytes)} · ↑ {formatBytes(iface.txBytes)}</span>
-                      </div>
-                    </div>
-                  ))}
-                </Expand>
-              )}
+              <ContainerStatsPanel id={id} />
               <button className="btn-ghost w-full" disabled={scanning} onClick={async () => { setScanning(true); try { setCves(await api.cveScan(id)); } catch (error) { notify((error as Error).message, 'error'); } finally { setScanning(false); } }}>
                 <Icon name="shieldCheck" className="h-4 w-4" /> {scanning ? 'Scanning…' : 'Run agentless CVE scan (OSV.dev)'}
               </button>

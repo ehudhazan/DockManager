@@ -172,9 +172,12 @@ export const api = {
     }),
   logsUrl: (id: string, tail = 300, timestamps = false) =>
     `/api/containers/${encodeURIComponent(id)}/logs?tail=${tail}&timestamps=${timestamps ? 1 : 0}`,
-  statsUrl: (id: string) => `/api/containers/${encodeURIComponent(id)}/stats`,
-  containerMetrics: (id: string) => get<ContainerMetricsResponse>(`/api/containers/${encodeURIComponent(id)}/metrics`),
-  containerNetwork: (id: string) => get<ContainerNetworkHistory>(`/api/containers/${encodeURIComponent(id)}/network`),
+  statsUrl: (id: string, hostId?: number) =>
+    `/api/containers/${encodeURIComponent(id)}/stats${hostId ? `?hostId=${hostId}` : ''}`,
+  containerMetrics: (id: string, hostId?: number) =>
+    get<ContainerMetricsResponse>(`/api/containers/${encodeURIComponent(id)}/metrics${hostId ? `?hostId=${hostId}` : ''}`),
+  containerNetwork: (id: string, hostId?: number) =>
+    get<ContainerNetworkHistory>(`/api/containers/${encodeURIComponent(id)}/network${hostId ? `?hostId=${hostId}` : ''}`),
   execUrl: (id: string, cmd: string) =>
     `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/exec/${encodeURIComponent(id)}?cmd=${encodeURIComponent(cmd)}`,
   archiveList: (id: string, path: string) =>

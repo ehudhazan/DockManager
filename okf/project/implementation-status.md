@@ -4,7 +4,7 @@ title: Delivered implementation
 description: What was actually built and verified for eh.DockManager, the generated file set, runtime behaviours exercised, and the deviations from PROMPT.md discovered during the build.
 tags: [status, implementation, build, deviations]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:36:33Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T16:58:52Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -33,6 +33,7 @@ The order in PROMPT.md §9 was followed. Every generated file carries a
 | Persistence | `Data/SqliteWalStore.cs` |
 | PKI & vault | `Security/CryptoAndCertManager.cs` |
 | Auth & SSO | `Security/AuthAndSsoEngine.cs` |
+| Trimmer descriptor (supporting) | `src/eh.DockManager.Server/ILLink.Descriptors.xml` (XML-DSig roots for SAML signing; see [SAML 2.0 SSO](/project/saml-sso.md)) |
 | QR encoder (supporting) | `Security/QrCodeGenerator.cs` |
 | Docker client | `Docker/DockerSocketClient.cs`, `Docker/DockerStreamDemuxer.cs` |
 | Network metrics | `Docker/NetworkMetricsTracker.cs` |

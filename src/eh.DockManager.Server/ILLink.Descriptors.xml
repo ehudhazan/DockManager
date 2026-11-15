@@ -1,0 +1,25 @@
+<linker>
+  <!--
+    SignedXml (System.Security.Cryptography.Xml), which ITfoxtec.Identity.Saml2 uses to sign the
+    SAML 2.0 SP metadata document and its AuthnRequests, resolves its digest and signature
+    algorithms through CryptoConfig at run time. The trimmer cannot see through that, so it
+    removes the managed hash shims and the RSA PKCS#1 signature formatters and the signing call
+    fails with:
+
+      System.Security.Cryptography.CryptographicException: Could not create hash algorithm
+      object. If the application has been trimmed, ensure the required algorithm implementations
+      are preserved.
+
+    CryptoConfig resolves the legacy "*Managed" names for the XML-DSig digest URIs, so those are
+    the types that must survive trimming (see dotnet/runtime#97274). Preserve exactly them rather
+    than rooting the whole System.Security.Cryptography assembly.
+  -->
+  <assembly fullname="System.Security.Cryptography">
+    <type fullname="System.Security.Cryptography.SHA1Managed" preserve="all" />
+    <type fullname="System.Security.Cryptography.SHA256Managed" preserve="all" />
+    <type fullname="System.Security.Cryptography.SHA384Managed" preserve="all" />
+    <type fullname="System.Security.Cryptography.SHA512Managed" preserve="all" />
+    <type fullname="System.Security.Cryptography.RSAPKCS1SignatureFormatter" preserve="all" />
+    <type fullname="System.Security.Cryptography.RSAPKCS1SignatureDeformatter" preserve="all" />
+  </assembly>
+</linker>

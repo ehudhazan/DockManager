@@ -4,7 +4,7 @@ title: eh.DockManager
 description: Home-server and enterprise container/cluster control plane, port 443 reverse proxy and app portal, auto-updater, and MCP server built on .NET 11 and React 19.
 tags: [project, dockmanager, architecture]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:14:28Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T16:58:52Z }
 sources:
   - id: prompt-md
     resource: ../../PROMPT.md
@@ -49,12 +49,13 @@ build rules.[^prompt-md]
 | Path | Contents |
 |------|----------|
 | `PROMPT.md` | Build brief and requirements (normative) |
+| `README.md` | Project README: features, architecture, quick start, configuration, HTTPS/trust, auth, MCP, development and publishing |
 | `global.json` | .NET SDK pin (`11.0.100`, `rollForward: latestMajor`) |
 | `opencode.json` | OpenCode configuration (default model `openrouter/deepseek/deepseek-v4.1-flash`; DebugMCP and Chrome DevTools MCP servers) |
-| `src/eh.DockManager.Server/` | ASP.NET Core server, implemented: `Program.cs` (hosts everything), `Models/DomainModels.cs`, `Data/SqliteWalStore.cs`, `Security/{CryptoAndCertManager,AuthAndSsoEngine,QrCodeGenerator,AcmeClient}.cs`, `Docker/{DockerSocketClient,DockerStreamDemuxer,NetworkMetricsTracker}.cs`, `Stacks/ComposeAndConverters.cs`, `Kubernetes/KubeClusterService.cs`, `Portal/{YarpPortalProxy,PortalAppCandidates}.cs`, `McpAndWebhooks/McpAndWebhookEngine.cs` |
+| `src/eh.DockManager.Server/` | ASP.NET Core server, implemented: `Program.cs` (hosts everything), `Models/DomainModels.cs`, `Data/SqliteWalStore.cs`, `Security/{CryptoAndCertManager,AuthAndSsoEngine,QrCodeGenerator,AcmeClient}.cs`, `Docker/{DockerSocketClient,DockerStreamDemuxer,NetworkMetricsTracker}.cs`, `Stacks/ComposeAndConverters.cs`, `Kubernetes/KubeClusterService.cs`, `Portal/{YarpPortalProxy,PortalAppCandidates}.cs`, `McpAndWebhooks/McpAndWebhookEngine.cs`, `ILLink.Descriptors.xml` (trimmer roots for XML-DSig; see [SAML 2.0 SSO](/project/saml-sso.md)) |
 | `src/eh.DockManager.Client/` | Vite + React 19 + Tailwind client, implemented: `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.js`, `postcss.config.js`, `tsconfig.json`, and `src/{main.tsx,App.tsx,ui.tsx,icons.tsx,api.ts,types.ts,index.css}` (see [UI & UX conventions](/project/ui-ux.md)) |
-| `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Multi-stage build and deployment, published as the Docker Hub image `ehudhazan/dockmanager` (the compose file also keeps its `build:` section so `./build.sh` retags locally); `.env.example` is the host-local template (the real `.env` is gitignored) |
-| `build.sh` | Build helper: exports `BUILD_NUMBER` = `git rev-list --count HEAD` and runs `docker compose build`, stamping the date-based version |
+| `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.env.example` | Multi-stage build and deployment, published as the Docker Hub image `ehudhazan/dockmanager` (the compose file also keeps its `build:` section so `./build.sh` builds and tags `latest` + the date-based version and pushes both); `.env.example` is the host-local template (the real `.env` is gitignored) |
+| `build.sh` | Release helper: exports `BUILD_NUMBER` = `git rev-list --count HEAD`, runs `docker compose build`, tags the image `latest` + the date-based version, and pushes both to Docker Hub (`--no-push` to skip the push) |
 | `AGENTS.md` | Binding knowledge-workflow rules for every agent |
 | `okf/` | This knowledge bundle |
 | `.opencode/skills/okf/` | The `okf` skill that defines the knowledge workflow |
@@ -71,6 +72,8 @@ runtime behaviours exercised, and the deviations discovered during the build).
 * Binding dependency and build rules: [Stack constraints](/project/stack-constraints.md).
 * Host-side compose prerequisites: [Host preparation](/project/deployment.md).
 * Connecting a remote Docker engine: [Remote Docker hosts](/project/remote-docker-hosts.md).
+* SAML 2.0 SSO, its dedicated signing certificates and the XML-DSig trimming rule:
+  [SAML 2.0 SSO (SP & IdP)](/project/saml-sso.md).
 * Working-environment guardrails (PII/secret redaction in tool output):
   [Agent environment guardrails](/environment/guardrails.md).
 * Browser automation against a laptop Chrome from this host:

@@ -179,7 +179,7 @@ If a future agent would benefit from knowing it, it belongs in the bundle.
 | Knowledge workflow skill | [`.opencode/skills/okf/SKILL.md`](.opencode/skills/okf/SKILL.md) |
 | Server sources | `src/eh.DockManager.Server/` |
 | Client sources | `src/eh.DockManager.Client/` |
-| Container build | `Dockerfile`, `docker-compose.yml`, `.env.example`, `build.sh` (stamps the date-based version) |
+| Container build | `Dockerfile`, `docker-compose.yml`, `.env.example`, `build.sh` (stamps the date-based version, tags `latest` + version, pushes both to Docker Hub) |
 
 Verification commands:
 
@@ -187,5 +187,5 @@ Verification commands:
 dotnet build src/eh.DockManager.Server/eh.DockManager.Server.csproj
 npm --prefix src/eh.DockManager.Client run typecheck
 npm --prefix src/eh.DockManager.Client run build
-./build.sh   # docker compose build with BUILD_NUMBER = git commit count (or: docker compose build)
+./build.sh --no-push   # build + tag latest/version; omit --no-push to also push to Docker Hub
 ```

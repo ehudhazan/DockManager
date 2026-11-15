@@ -19,8 +19,9 @@ services:
         # Build number for the date-based version; export BUILD_NUMBER, or use ./build.sh
         # which sets it to the git commit count. Empty falls back to a build-time clock value.
         BUILD_NUMBER: ${BUILD_NUMBER:-}
-    # Published on Docker Hub as ehudhazan/dockmanager. `./build.sh` / `docker compose build`
-    # still builds from source and tags this name; `docker compose pull` fetches the published tag.
+    # Published on Docker Hub as ehudhazan/dockmanager. `./build.sh` builds from source, tags
+    # this name `latest` plus the date-based version, and pushes both; `docker compose pull`
+    # fetches the published `latest`.
     image: ehudhazan/dockmanager:latest
     container_name: eh-dockmanager
     restart: unless-stopped

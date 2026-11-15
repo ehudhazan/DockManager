@@ -4,7 +4,7 @@ title: Host preparation
 description: Host-side steps required before the compose stack starts: bind-mount ownership, the host docker group id, and the empty-password bootstrap fallback.
 tags: [deployment, compose, permissions, bootstrap]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:14:28Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T13:36:43Z }
 sources:
   - id: compose-file
     resource: ../../docker-compose.yml
@@ -98,6 +98,16 @@ container list confirms the Docker socket is reachable through the `group_add` g
   The `.db` is owned by `64198:root` mode `644`, so on a host where the operator is not
   `64198`/root it can only be edited through a root container (e.g. `busybox`) or `sudo`.
 * **Image name.** The stack runs the Docker Hub image `ehudhazan/dockmanager:latest`
-  (`docker-compose.yml` keeps its `build:` section, so `./build.sh` / `docker compose build`
-  still retag it locally). The container and compose project are still named `eh-dockmanager`,
-  so `docker logs eh-dockmanager` and the `.env`/`./data` steps above are unchanged.
+  (`docker-compose.yml` keeps its `build:` section, so `./build.sh` still builds and tags it
+  locally and `docker compose build` retags it). The container and compose project are still
+  named `eh-dockmanager`, so `docker logs eh-dockmanager` and the `.env`/`./data` steps above
+  are unchanged.
+* **Publishing to Docker Hub.** `./build.sh` builds, tags the image both `latest` and the
+  date-based version (`yyyy.M.d.<buildNumber>`), and pushes both tags from the build host
+  (the operator's `docker login` credentials in `~/.docker/config.json` are already in
+  place). The version tag pins the release; `latest` follows the newest build. Run
+  `./build.sh --no-push` to build and tag without publishing. The last push
+  (`2026-11-14T13:35Z`, via `./build.sh`) carried tags `latest` and `2026.11.14.10` with the
+  same digest `sha256:a2cf4769eb950f6a35f6eb36138e36a0e4e828230f98c3975b823bd71f0c45ae`. See
+  the Publishing bullet in [Stack constraints](/project/stack-constraints.md) for the build
+  ordering rule.

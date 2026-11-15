@@ -406,6 +406,23 @@ async Task<DockerSocketClient> ClientForAsync(HttpContext ctx, CancellationToken
     return await dockerFactory.GetDefaultAsync(ct);
 }
 
+// The network tracker keys its history by full container id, so a container name (or short id)
+// is resolved through Docker inspect before reading the timeline. Falls back to the input when
+// the container cannot be inspected (stopped/removed), so the caller still gets a valid response.
+async Task<string> ResolveContainerKeyAsync(DockerSocketClient client, string idOrName, CancellationToken ct)
+{
+    try
+    {
+        using var doc = await client.InspectContainerAsync(idOrName, ct);
+        if (doc.RootElement.ValueKind == JsonValueKind.Object
+            && doc.RootElement.TryGetProperty("Id", out var idProp)
+            && idProp.GetString() is { Length: > 0 } resolved)
+            return resolved;
+    }
+    catch { /* unresolvable identifier: fall back to the raw value */ }
+    return idOrName;
+}
+
 long? CurrentUserId(HttpContext ctx) =>
     long.TryParse(ctx.User.FindFirst(EhClaims.UserId)?.Value, out var id) ? id : null;
 
@@ -1521,6 +1538,7 @@ containers.MapGet("/{id}/logs", async (string id, HttpContext ctx, CancellationT
 containers.MapGet("/{id}/metrics", async (string id, HttpContext ctx, CancellationToken ct) =>
 {
     var client = await ClientForAsync(ctx, ct);
+    var key = await ResolveContainerKeyAsync(client, id, ct);
     string? payload = null;
     try
     {
@@ -1532,14 +1550,18 @@ containers.MapGet("/{id}/metrics", async (string id, HttpContext ctx, Cancellati
     {
         /* a stopped container may not report stats */
     }
-    var stats = payload is null ? null : NetworkMetricsTracker.ParseExtendedMetric(id, payload);
-    var network = networkTracker.GetContainerNetworkHistory(id);
+    var stats = payload is null ? null : NetworkMetricsTracker.ParseExtendedMetric(key, payload);
+    var network = networkTracker.GetContainerNetworkHistory(key);
     return Results.Json(new { stats, network });
 });
 
 // Container network timeline only.
-containers.MapGet("/{id}/network", (string id) =>
-    Results.Json(networkTracker.GetContainerNetworkHistory(id)));
+containers.MapGet("/{id}/network", async (string id, HttpContext ctx, CancellationToken ct) =>
+{
+    var client = await ClientForAsync(ctx, ct);
+    var key = await ResolveContainerKeyAsync(client, id, ct);
+    return Results.Json(networkTracker.GetContainerNetworkHistory(key));
+});
 
 containers.MapGet("/{id}/stats", async (string id, HttpContext ctx, CancellationToken ct) =>
 {

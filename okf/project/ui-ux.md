@@ -4,7 +4,7 @@ title: UI & UX conventions
 description: The design system, navigation model, and mobile behaviour of the eh.DockManager React client, including the icon set, info tooltips, clickable surfaces, and role-based views.
 tags: [ui, ux, frontend, react, design-system, mobile]
 status: stable
-generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T12:41:24Z }
+generated: { by: opencode/deepseek-v4.1-flash, at: 2026-11-14T14:22:22Z }
 sources:
   - id: client-src
     resource: ../../src/eh.DockManager.Client/src
@@ -61,8 +61,9 @@ mobile. This concept records the conventions so later changes stay consistent.[^
   (Containers, Images, Proxy routes, Docker hosts, K8s clusters, Uptime/Settings); portal cards
   keep their Open / Terminal / Edit actions always visible instead of hover-only.
 * **Role clarity.** `RoleBadge` + `roleBlurb` describe Admin/Viewer/Pending; the top-bar user
-  menu and the sidebar footer show the current role. Non-admins see only Portal + Dashboard and
-  are redirected away from admin-only views.
+  menu shows the role label and the desktop sidebar footer shows it as an icon-only badge inline
+  with the username (its tooltip carries the `roleBlurb`). Non-admins see only Portal + Dashboard
+  and are redirected away from admin-only views.
 * **Human-readable values.** Use `formatBytes` for image sizes, disk totals, prune results and
   file listings, and `formatRelative` for created/last-seen timestamps; never show raw bytes.
 * **Exec UX.** The terminal drawer always shows why a session ended; Inspect offers a shell
@@ -132,9 +133,9 @@ mobile. This concept records the conventions so later changes stay consistent.[^
 * **Server disconnection & version skew.** A poll of `GET /api/system/health` raises a **"Server
   disconnected"** banner when the server is unreachable. When the returned `appVersion` changes (a
   redeploy) an **"App upgraded"** banner names the new version and reloads the shell after a short
-  grace period (refreshing the service worker first); the running app version is shown in the
-  desktop sidebar footer, the mobile **More** sheet footer (every role), and Settings → System
-  information (with the boot id and build token). See
+  grace period (refreshing the service worker first); the running app version is shown as a
+  bordered footer row of the desktop sidebar user card, in the mobile **More** sheet footer (every
+  role), and in Settings → System information (with the boot id and build token). See
   [Client/server version negotiation & asset freshness](/project/client-server-versioning.md).
 * **Navigation always starts at the top.** Changing views scrolls the window and `main` back to the top,
   so a deep page such as Images never opens mid-scroll after a navigation.

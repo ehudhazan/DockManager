@@ -267,6 +267,10 @@ public sealed class SamlSpService
             Issuer = _spConfig.EntityId,
             AllowedIssuer = _spConfig.IdpEntityId,
             SignatureAlgorithm = Saml2SecurityAlgorithms.RsaSha256Signature,
+            // Sign AuthnRequests with the dedicated SP PFX. ITfoxtec only signs a redirect-bound
+            // AuthnRequest when this flag is set (the metadata's AuthnRequestsSigned alone is not
+            // enough), so without it the SP advertises signing but sends unsigned requests.
+            SignAuthnRequest = true,
             CertificateValidationMode = System.ServiceModel.Security.X509CertificateValidationMode.ChainTrust,
             RevocationMode = X509RevocationMode.Online,
             DetectReplayedTokens = true,
@@ -276,8 +280,15 @@ public sealed class SamlSpService
         if (!string.IsNullOrEmpty(_spConfig.IdpSsoUrl))
             config.SingleSignOnDestination = new Uri(_spConfig.IdpSsoUrl);
 
-        var signing = LoadSpSigningCertificate();
-        if (signing is not null) config.SigningCertificate = signing;
+        var signing = LoadOrCreateSpSigningCertificate();
+        if (signing is not null)
+        {
+            config.SigningCertificate = signing;
+            // ITfoxtec only signs an AuthnRequest when both SigningCertificate and
+            // SignAuthnRequest are set (see Saml2RedirectBinding). The dedicated SP PFX is
+            // always available, so SP-initiated login is signed by default.
+            config.SignAuthnRequest = true;
+        }
 
         // Resolve IdP metadata (cards, SSO URL, validation certificates).
         try
@@ -312,20 +323,59 @@ public sealed class SamlSpService
         _log.LogInformation("SAML SP configuration loaded (IdP SSO: {Sso}).", config.SingleSignOnDestination);
     }
 
-    private X509Certificate2? LoadSpSigningCertificate()
+    /// <summary>
+    /// Signing certificate for SP AuthnRequests. An operator-supplied PFX
+    /// (<see cref="SamlSpConfig.SpSigningCertPfxBase64"/>) wins; otherwise a dedicated, persisted
+    /// <c>sp-signing.pfx</c> is generated and reused. It is deliberately separate from the TLS
+    /// certificate (and from the SAML IdP's <c>idp-signing.pfx</c>), so rotating TLS never breaks
+    /// SAML signing and vice versa.
+    /// </summary>
+    private X509Certificate2? LoadOrCreateSpSigningCertificate()
     {
-        if (string.IsNullOrEmpty(_spConfig.SpSigningCertPfxBase64)) return null;
-        try
+        if (!string.IsNullOrEmpty(_spConfig.SpSigningCertPfxBase64))
         {
-            var bytes = Convert.FromBase64String(_spConfig.SpSigningCertPfxBase64);
-            return X509CertificateLoader.LoadPkcs12(bytes, _spConfig.SpSigningCertPassword,
-                X509KeyStorageFlags.Exportable);
+            try
+            {
+                var bytes = Convert.FromBase64String(_spConfig.SpSigningCertPfxBase64);
+                return X509CertificateLoader.LoadPkcs12(bytes, _spConfig.SpSigningCertPassword,
+                    X509KeyStorageFlags.Exportable);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Invalid SP signing certificate; falling back to the dedicated SP PFX.");
+            }
         }
-        catch (Exception ex)
+
+        var path = Path.Combine(EhConstants.CertsDir, "sp-signing.pfx");
+        const string password = "eh-dockmanager-sp";
+        if (File.Exists(path))
         {
-            _log.LogWarning(ex, "Invalid SP signing certificate; continuing without request signing.");
-            return null;
+            try
+            {
+                var existing = X509CertificateLoader.LoadPkcs12FromFile(path, password, X509KeyStorageFlags.Exportable);
+                if (existing.NotAfter > DateTimeOffset.UtcNow.AddDays(7)) return existing;
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Reloading the SAML SP signing certificate.");
+            }
         }
+
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest("CN=eh.DockManager SAML SP, O=eh.DockManager", rsa,
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, true));
+        req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
+        var now = DateTimeOffset.UtcNow.AddDays(-1);
+        using var self = req.CreateSelfSigned(now, now.AddYears(5));
+        File.WriteAllBytes(path, self.Export(X509ContentType.Pfx, password));
+        CryptoVault.TryRestrict(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        _log.LogInformation("Issued dedicated SAML SP signing certificate at {Path} (expires {Expiry:u}).",
+            path, self.NotAfter);
+        return X509CertificateLoader.LoadPkcs12(self.Export(X509ContentType.Pfx, password), password,
+            X509KeyStorageFlags.Exportable);
     }
 
     public Saml2Configuration GetLiveConfiguration()

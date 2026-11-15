@@ -86,4 +86,12 @@
     <TrimmerRootAssembly Include="SQLitePCLRaw.core" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- SignedXml — used by ITfoxtec to sign the SAML SP metadata and AuthnRequests — resolves
+         its digest and signature algorithms through CryptoConfig at run time, which the trimmer
+         cannot see. Without the managed shims and the RSA PKCS#1 formatters it drops them and
+         signing throws "Could not create hash algorithm object". Root exactly those types. -->
+    <TrimmerRootDescriptor Include="ILLink.Descriptors.xml" />
+  </ItemGroup>
+
 </Project>
